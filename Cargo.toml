@@ -1,0 +1,39 @@
+[package]
+name = "xint"
+version = "0.1.0"
+edition = "2021"
+description = "X Intelligence CLI — search, analyze, and engage on X/Twitter from the terminal"
+license = "MIT"
+repository = "https://github.com/0xNyk/xint-rs"
+authors = ["Nyk"]
+keywords = ["twitter", "x", "cli", "osint", "intelligence"]
+
+[[bin]]
+name = "xint"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+md-5 = "0.10"
+base64 = "0.22"
+rand = "0.8"
+getrandom = "0.3"
+csv = "1"
+dotenvy = "0.15"
+colored = "2"
+chrono = { version = "0.4", features = ["serde"] }
+ctrlc = "3"
+anyhow = "1"
+thiserror = "2"
+url = "2"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+codegen-units = 1
