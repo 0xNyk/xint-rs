@@ -7,7 +7,8 @@ Fast, zero-dependency binary for X/Twitter search, analysis, and engagement from
 Requires env vars (in `.env` or exported):
 - `X_BEARER_TOKEN` — for search, profile, tweet, thread, trends, watch, report
 - `X_CLIENT_ID` — for OAuth commands (bookmarks, likes, following, diff)
-- `XAI_API_KEY` — for AI analysis (analyze, report --sentiment)
+- `XAI_API_KEY` — for AI analysis (analyze, report, x-search, collections upload/search)
+- `XAI_MANAGEMENT_API_KEY` — for collections management (list, create, ensure, add-document)
 
 OAuth setup (one-time): `xint auth setup`
 
@@ -100,6 +101,48 @@ xint watchlist                                # List watched accounts
 xint watchlist add @username "competitor"     # Add with note
 xint watchlist remove @username               # Remove
 xint watchlist check @username                # Check if watched
+```
+
+### xAI X Search (no cookies/GraphQL)
+
+Search X via xAI's hosted x_search tool. No bearer token or cookies needed — only `XAI_API_KEY`.
+
+```bash
+# Create a queries file
+echo '["AI agents", "solana"]' > queries.json
+
+# Run search scan → markdown report + JSON payload
+xint x-search --queries-file queries.json --out-md report.md --out-json raw.json
+
+# Date range filter
+xint x-search --queries-file queries.json --from-date 2026-02-01 --to-date 2026-02-15
+
+# Emit memory candidates (deduped against existing workspace sources)
+xint x-search --queries-file queries.json --workspace /path/to/workspace --emit-candidates
+
+# Custom model
+xint x-search --queries-file queries.json --model grok-3
+```
+
+### xAI Collections Knowledge Base
+
+Upload documents, manage collections, and semantic-search via xAI Files + Collections APIs.
+
+```bash
+# List existing collections
+xint collections list
+
+# Create or find a collection
+xint collections ensure --name "research-kb"
+
+# Upload a file to xAI
+xint collections upload --path ./report.md
+
+# Semantic search across documents
+xint collections search --query "AI agent frameworks"
+
+# Sync a directory to a collection (upload + attach)
+xint collections sync-dir --collection-name "kb" --dir ./docs --glob "*.md" --limit 50
 ```
 
 ### Utilities

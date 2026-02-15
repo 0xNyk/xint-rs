@@ -59,7 +59,8 @@ Set in `.env` or as environment variables:
 |----------|----------|-------------|
 | `X_BEARER_TOKEN` | Yes | X API v2 bearer token ([get one here](https://developer.x.com)) |
 | `X_CLIENT_ID` | For OAuth | OAuth 2.0 client ID (bookmarks, likes, following, diff) |
-| `XAI_API_KEY` | For Grok | xAI API key (analyze, sentiment, reports) |
+| `XAI_API_KEY` | For Grok | xAI API key (analyze, sentiment, reports, x-search, collections) |
+| `XAI_MANAGEMENT_API_KEY` | For Collections | xAI Management API key (collections management) |
 
 ## Commands
 
@@ -85,6 +86,8 @@ Set in `.env` or as environment variables:
 | `watchlist [cmd]` | `wl` | — | Account watchlist management |
 | `auth [cmd]` | — | — | OAuth setup / status / refresh |
 | `cache [cmd]` | — | — | Cache management |
+| `x-search` | `xs` | xAI | xAI-hosted X search (Responses API, no cookies) |
+| `collections [cmd]` | `col` | xAI + Mgmt | Knowledge base: upload, search, sync files |
 
 ## Usage
 
@@ -220,6 +223,45 @@ xint watchlist remove @user             # Remove
 xint watchlist check @user              # Check membership
 ```
 
+### xAI X Search
+
+Search X via xAI's hosted `x_search` tool — no cookies, no GraphQL, no X API bearer token needed. Uses the Responses API.
+
+```bash
+# Search with queries from a JSON file
+echo '["AI agents", "solana DeFi"]' > queries.json
+xint x-search --queries-file queries.json --out-md report.md --out-json raw.json
+
+# Custom model and date range
+xint x-search --queries-file queries.json --model grok-3 --from-date 2026-02-01
+
+# With memory candidate emission (for agent workflows)
+xint x-search --queries-file queries.json --workspace /path/to/workspace --emit-candidates
+```
+
+### xAI Collections (Knowledge Base)
+
+Upload files, manage collections, and semantic-search your documents via xAI's Files + Collections APIs.
+
+```bash
+# List collections
+xint collections list
+
+# Create or ensure a collection exists
+xint collections ensure --name "research-kb"
+
+# Upload a file
+xint collections upload --path report.md
+
+# Search across collections
+xint collections search --query "AI agent frameworks" --collection-ids id1,id2
+
+# Sync a directory of files to a collection
+xint collections sync-dir --collection-name "kb" --dir ./docs --glob "*.md" --limit 50
+```
+
+Requires `XAI_API_KEY` (file upload + search) and `XAI_MANAGEMENT_API_KEY` (collections management).
+
 ## OAuth Setup
 
 Bookmarks, likes, following, and follower tracking require OAuth 2.0 PKCE:
@@ -279,7 +321,8 @@ xint-rs/
 │   ├── sentiment.rs          Batched sentiment via Grok
 │   ├── api/
 │   │   ├── twitter.rs        X API v2 (search, tweet, profile, thread)
-│   │   └── grok.rs           xAI Grok (chat completions)
+│   │   ├── grok.rs           xAI Grok (chat completions)
+│   │   └── xai.rs            xAI Responses API + Collections/Files
 │   ├── auth/
 │   │   └── oauth.rs          OAuth 2.0 PKCE (callback server, refresh)
 │   └── commands/
@@ -297,7 +340,9 @@ xint-rs/
 │       ├── costs_cmd.rs       Cost tracking CLI
 │       ├── watchlist.rs       Watchlist CRUD
 │       ├── auth_cmd.rs        Auth setup / status / refresh
-│       └── cache_cmd.rs       Cache clear / status
+│       ├── cache_cmd.rs       Cache clear / status
+│       ├── x_search.rs        xAI X Search (Responses API)
+│       └── collections.rs     xAI Collections KB management
 └── data/                     Runtime data (gitignored)
     ├── cache/
     ├── exports/

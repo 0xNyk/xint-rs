@@ -13,3 +13,5 @@ pub mod costs_cmd;
 pub mod watchlist;
 pub mod auth_cmd;
 pub mod cache_cmd;
+pub mod x_search;
+pub mod collections;

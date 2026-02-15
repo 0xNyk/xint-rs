@@ -78,6 +78,14 @@ pub enum Commands {
 
     /// Cache management
     Cache(CacheArgs),
+
+    /// xAI X Search (Responses API — no cookies/GraphQL)
+    #[command(alias = "xs")]
+    XSearch(XSearchArgs),
+
+    /// xAI Collections knowledge base management
+    #[command(alias = "col")]
+    Collections(CollectionsArgs),
 }
 
 // ---------------------------------------------------------------------------
@@ -500,4 +508,69 @@ pub struct AuthArgs {
 pub struct CacheArgs {
     /// Subcommand: clear
     pub subcommand: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// X Search (xAI Responses API)
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+pub struct XSearchArgs {
+    /// Workspace root (for memory candidate dedup)
+    #[arg(long, default_value = ".")]
+    pub workspace: String,
+
+    /// JSON file with queries: {"queries": [...]} or [...]
+    #[arg(long)]
+    pub queries_file: String,
+
+    /// Path to write markdown report
+    #[arg(long, default_value = "x-search-report.md")]
+    pub out_md: String,
+
+    /// Path to write raw JSON payload
+    #[arg(long, default_value = "x-search-raw.json")]
+    pub out_json: String,
+
+    /// Append new memory candidates (deduped by source)
+    #[arg(long)]
+    pub emit_candidates: bool,
+
+    /// Candidate JSONL output path
+    #[arg(long, default_value = "")]
+    pub candidates_out: String,
+
+    /// xAI model
+    #[arg(long, default_value = "grok-4")]
+    pub model: String,
+
+    /// Max search results per query
+    #[arg(long, default_value = "10")]
+    pub max_results: u32,
+
+    /// Timeout in seconds per query
+    #[arg(long, default_value = "45")]
+    pub timeout_seconds: u32,
+
+    /// From date filter (YYYY-MM-DD)
+    #[arg(long)]
+    pub from_date: Option<String>,
+
+    /// To date filter (YYYY-MM-DD)
+    #[arg(long)]
+    pub to_date: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Collections (xAI Management API)
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+pub struct CollectionsArgs {
+    /// Subcommand: list, create, ensure, add-document, upload, search, sync-dir
+    pub subcommand: Option<Vec<String>>,
+
+    /// Top-K results for document search
+    #[arg(long, default_value = "8")]
+    pub top_k: u32,
 }

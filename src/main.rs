@@ -84,6 +84,12 @@ async fn main() -> Result<()> {
         Some(Commands::Cache(args)) => {
             commands::cache_cmd::run(&args, &config)?;
         }
+        Some(Commands::XSearch(args)) => {
+            commands::x_search::run(&args, &config).await?;
+        }
+        Some(Commands::Collections(args)) => {
+            commands::collections::run(&args, &config).await?;
+        }
         None => {
             // Show help when no command provided
             use clap::CommandFactory;
