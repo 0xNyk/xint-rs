@@ -45,6 +45,9 @@ async fn main() -> Result<()> {
         Some(Commands::Tweet(args)) => {
             commands::tweet::run(&args, &config, &client).await?;
         }
+        Some(Commands::Article(args)) => {
+            commands::article::run(&args, &config).await?;
+        }
         Some(Commands::Bookmarks(args)) => {
             commands::bookmarks::run(&args, &config, &client).await?;
         }

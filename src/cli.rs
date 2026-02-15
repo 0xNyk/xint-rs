@@ -35,6 +35,10 @@ pub enum Commands {
     /// Fetch a single tweet
     Tweet(TweetArgs),
 
+    /// Fetch and read full article content from a URL
+    #[command(alias = "read")]
+    Article(ArticleArgs),
+
     /// Fetch your bookmarked tweets (OAuth required)
     #[command(alias = "bm")]
     Bookmarks(BookmarksArgs),
@@ -304,6 +308,24 @@ pub struct TweetArgs {
     /// JSON output
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Parser)]
+pub struct ArticleArgs {
+    /// URL to fetch article from
+    pub url: String,
+
+    /// JSON output
+    #[arg(long)]
+    pub json: bool,
+
+    /// Full article text (no truncation)
+    #[arg(long)]
+    pub full: bool,
+
+    /// Grok model
+    #[arg(long, default_value = "grok-3-mini")]
+    pub model: String,
 }
 
 // ---------------------------------------------------------------------------

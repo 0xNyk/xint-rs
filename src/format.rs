@@ -82,8 +82,15 @@ pub fn format_tweet_terminal(t: &Tweet, index: Option<usize>, full: bool) -> Str
         prefix, t.username, engagement, time, clean_text
     );
 
-    if let Some(url) = t.urls.first() {
-        out.push_str(&format!("\n\u{1f517} {}", url));
+    if let Some(u) = t.urls.first() {
+        if let Some(ref title) = u.title {
+            out.push_str(&format!("\n\u{1f4f0} \"{}\"", title));
+            if let Some(ref desc) = u.description {
+                let short = if desc.len() > 120 { &desc[..120] } else { desc.as_str() };
+                out.push_str(&format!(" \u{2014} {}", short));
+            }
+        }
+        out.push_str(&format!("\n\u{1f517} {}", u.url));
     }
     out.push_str(&format!("\n{}", t.tweet_url));
     out
@@ -180,15 +187,18 @@ pub fn format_tweet_markdown(t: &Tweet) -> String {
         let links: Vec<String> = t
             .urls
             .iter()
-            .filter_map(|u| {
-                url::Url::parse(u)
-                    .ok()
-                    .map(|parsed| format!("[{}]({})", parsed.host_str().unwrap_or("link"), u))
+            .map(|u| {
+                let display = match &u.title {
+                    Some(t) => t.clone(),
+                    None => url::Url::parse(&u.url)
+                        .ok()
+                        .and_then(|p| p.host_str().map(String::from))
+                        .unwrap_or_else(|| "link".to_string()),
+                };
+                format!("[{}]({})", display, u.url)
             })
             .collect();
-        if !links.is_empty() {
-            out.push_str(&format!("\n  Links: {}", links.join(", ")));
-        }
+        out.push_str(&format!("\n  Links: {}", links.join(", ")));
     }
 
     out

@@ -5,6 +5,7 @@ pub mod report;
 pub mod thread;
 pub mod profile;
 pub mod tweet;
+pub mod article;
 pub mod bookmarks;
 pub mod engagement;
 pub mod trends;

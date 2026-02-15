@@ -18,6 +18,19 @@ pub struct TweetMetrics {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UrlEntity {
+    pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unwound_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub images: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tweet {
     pub id: String,
     pub text: String,
@@ -27,7 +40,7 @@ pub struct Tweet {
     pub created_at: String,
     pub conversation_id: String,
     pub metrics: TweetMetrics,
-    pub urls: Vec<String>,
+    pub urls: Vec<UrlEntity>,
     pub mentions: Vec<String>,
     pub hashtags: Vec<String>,
     pub tweet_url: String,
@@ -68,6 +81,15 @@ pub struct RawTweetMetrics {
 #[derive(Debug, Deserialize)]
 pub struct RawUrl {
     pub expanded_url: Option<String>,
+    pub unwound_url: Option<String>,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub images: Option<Vec<RawUrlImage>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RawUrlImage {
+    pub url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -270,6 +292,23 @@ pub struct GrokUsage {
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
     pub total_tokens: u64,
+}
+
+// ---------------------------------------------------------------------------
+// Article
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Article {
+    pub url: String,
+    pub title: String,
+    pub description: String,
+    pub content: String,
+    pub author: String,
+    pub published: String,
+    pub domain: String,
+    pub ttr: u64,        // time to read in minutes
+    pub word_count: u64,
 }
 
 // ---------------------------------------------------------------------------

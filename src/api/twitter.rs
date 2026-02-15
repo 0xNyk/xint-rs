@@ -60,12 +60,35 @@ pub fn parse_tweets(raw: &RawResponse) -> Vec<Tweet> {
             };
 
             let entities = t.get("entities");
-            let urls: Vec<String> = entities
+            let urls: Vec<UrlEntity> = entities
                 .and_then(|e| e.get("urls"))
                 .and_then(|v| v.as_array())
                 .map(|arr| {
                     arr.iter()
-                        .filter_map(|u| u.get("expanded_url").and_then(|v| v.as_str()).map(String::from))
+                        .filter_map(|u| {
+                            let expanded = u.get("expanded_url").and_then(|v| v.as_str())?;
+                            let unwound = u.get("unwound_url").and_then(|v| v.as_str());
+                            let url = unwound.unwrap_or(expanded).to_string();
+                            let title = u.get("title").and_then(|v| v.as_str()).map(String::from);
+                            let description = u.get("description").and_then(|v| v.as_str()).map(String::from);
+                            let unwound_url = unwound
+                                .filter(|uw| *uw != expanded)
+                                .map(String::from);
+                            let images = u.get("images")
+                                .and_then(|v| v.as_array())
+                                .map(|imgs| {
+                                    imgs.iter()
+                                        .filter_map(|img| {
+                                            img.get("url")
+                                                .or_else(|| img.as_str().map(|_| img))
+                                                .and_then(|v| v.as_str())
+                                                .map(String::from)
+                                        })
+                                        .collect::<Vec<_>>()
+                                })
+                                .filter(|v| !v.is_empty());
+                            Some(UrlEntity { url, title, description, unwound_url, images })
+                        })
                         .collect()
                 })
                 .unwrap_or_default();

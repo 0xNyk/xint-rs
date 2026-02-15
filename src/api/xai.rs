@@ -185,6 +185,93 @@ pub async fn x_search(
 }
 
 // ---------------------------------------------------------------------------
+// Responses API — web_search tool (article fetching)
+// ---------------------------------------------------------------------------
+
+/// Call xAI Responses API with web_search tool to fetch article content from a URL.
+pub async fn web_search_article(
+    http: &reqwest::Client,
+    api_key: &str,
+    url: &str,
+    domain: &str,
+    model: &str,
+    timeout_secs: u64,
+) -> Result<String> {
+    let prompt = format!(
+        "Read the article at this URL and extract its content. Return a JSON object with these fields:\n\
+         - title: article title\n\
+         - description: 1-2 sentence summary\n\
+         - content: the full article text (plain text, no HTML)\n\
+         - author: author name (empty string if unknown)\n\
+         - published: publication date (empty string if unknown)\n\n\
+         Return ONLY valid JSON, no markdown fences, no explanation.\n\nURL: {}",
+        url
+    );
+
+    let body = serde_json::json!({
+        "model": model,
+        "tools": [{
+            "type": "web_search",
+            "allowed_domains": [domain],
+        }],
+        "input": [{
+            "role": "user",
+            "content": prompt,
+        }],
+    });
+
+    let api_url = format!("{}/responses", API_BASE);
+
+    let res = http
+        .post(&api_url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .timeout(std::time::Duration::from_secs(timeout_secs))
+        .json(&body)
+        .send()
+        .await?;
+
+    let status = res.status().as_u16();
+    if !res.status().is_success() {
+        let text = res.text().await.unwrap_or_default();
+        bail!("xAI API error ({}): {}", status, &text[..text.len().min(500)]);
+    }
+
+    let data: serde_json::Value = res.json().await?;
+
+    // Extract output text from Responses API format
+    if let Some(output) = data.get("output").and_then(|v| v.as_array()) {
+        for item in output {
+            let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
+            if item_type == "message" {
+                if let Some(content) = item.get("content").and_then(|v| v.as_array()) {
+                    for part in content {
+                        let part_type = part.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                        if part_type == "output_text" || part_type == "text" {
+                            if let Some(txt) = part.get("text").and_then(|v| v.as_str()) {
+                                let trimmed = txt.trim();
+                                if !trimmed.is_empty() {
+                                    return Ok(trimmed.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // Direct text field
+            if let Some(txt) = item.get("text").and_then(|v| v.as_str()) {
+                let trimmed = txt.trim();
+                if !trimmed.is_empty() {
+                    return Ok(trimmed.to_string());
+                }
+            }
+        }
+    }
+
+    bail!("No content returned for {}", url)
+}
+
+// ---------------------------------------------------------------------------
 // Management API — Collections
 // ---------------------------------------------------------------------------
 
