@@ -73,6 +73,7 @@ Set in `.env` or as environment variables:
 | `thread <id>` | `t` | Bearer | Fetch full conversation thread |
 | `profile <user>` | `p` | Bearer | User profile + recent tweets |
 | `tweet <id>` | — | Bearer | Fetch a single tweet |
+| `article <url>` | `read` | xAI | Fetch & analyze article content |
 | `bookmarks` | `bm` | OAuth | List bookmarked tweets |
 | `bookmark <id>` | — | OAuth | Bookmark a tweet |
 | `unbookmark <id>` | — | OAuth | Remove a bookmark |
@@ -88,6 +89,7 @@ Set in `.env` or as environment variables:
 | `cache [cmd]` | — | — | Cache management |
 | `x-search` | `xs` | xAI | xAI-hosted X search (Responses API, no cookies) |
 | `collections [cmd]` | `col` | xAI + Mgmt | Knowledge base: upload, search, sync files |
+| `mcp` | `mcp-server` | — | Start MCP server for AI agents |
 
 ## Usage
 
@@ -176,6 +178,33 @@ xint search "AI" --json | xint analyze --pipe "Summarize the key themes"
 # Custom system prompt
 xint analyze --system "You are a crypto analyst" "What's moving today?"
 ```
+
+### Article Fetching & Analysis
+
+Fetch and extract full article content from any URL using xAI's web_search tool. Also supports extracting linked articles from X tweets.
+
+```bash
+# Fetch article content
+xint article "https://example.com"
+
+# Fetch + analyze with AI
+xint article "https://example.com" --ai "Summarize key takeaways"
+
+# Auto-extract article from X tweet URL and analyze
+xint article "https://x.com/user/status/123456789" --ai "What are the main points?"
+
+# Full content without truncation
+xint article "https://example.com" --full
+
+# JSON output
+xint article "https://example.com" --json
+```
+
+The `article` command:
+- Uses xAI's `grok-4` model with web_search tool (requires `XAI_API_KEY`)
+- Extracts title, author, publication date, word count, reading time
+- `--ai` flag passes article content to Grok for analysis
+- Auto-detects X tweet URLs and extracts linked articles
 
 ### Trends
 

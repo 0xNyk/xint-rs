@@ -1,6 +1,60 @@
-# xint — X Intelligence CLI
+---
+name: xint-rs
+description: >
+  Fast X Intelligence CLI (Rust) — search, analyze, and engage on X/Twitter from the terminal.
+  Use when: (1) user says "x research", "search x for", "search twitter for", "what are people saying about",
+  "what's twitter saying", "check x for", "x search", "search x", (2) user wants real-time monitoring with "watch",
+  (3) user needs AI-powered analysis with Grok ("analyze", "sentiment"), (4) user needs intelligence reports ("report"),
+  (5) user wants to track followers ("diff"), (6) user needs trending topics ("trends").
+  Also supports: bookmarks, likes, following (OAuth), x-search, collections, CSV/JSON/JSONL export.
+  Non-goals: Not for posting tweets, not for DMs, not for enterprise features.
+credentials:
+  - name: X_BEARER_TOKEN
+    description: X API v2 bearer token for search, profile, thread, tweet, trends
+    required: true
+  - name: XAI_API_KEY
+    description: xAI API key for Grok analysis, article fetching, sentiment, x-search, collections
+    required: false
+  - name: XAI_MANAGEMENT_API_KEY
+    description: xAI Management API key for collections management
+    required: false
+  - name: X_CLIENT_ID
+    description: X OAuth 2.0 client ID for user-context operations (bookmarks, likes, following, diff)
+    required: false
+---
+
+# xint — X Intelligence CLI (Rust)
 
 Fast, zero-dependency binary for X/Twitter search, analysis, and engagement from the terminal. All output goes to stdout (pipe-friendly).
+
+## Security Considerations
+
+This skill requires sensitive credentials. Follow these guidelines:
+
+### Credentials
+- **X_BEARER_TOKEN**: Required for X API. Treat as a secret - only set in environment or `.env` file
+- **XAI_API_KEY**: Optional, needed for AI analysis. Also a secret
+- **X_CLIENT_ID**: Optional, needed for OAuth. Less sensitive but don't expose publicly
+- **XAI_MANAGEMENT_API_KEY**: Optional, for collections management
+
+### File Writes
+- This skill writes to its own `data/` directory: cache, exports, snapshots, OAuth tokens
+- OAuth tokens stored with restrictive permissions (chmod 600)
+- Review exported data before sharing - may contain sensitive search queries
+
+### Webhooks
+- The `watch` command supports `--webhook` to send data to external URLs
+- Only use webhooks you control (your own servers, Slack/Discord you own)
+- Don't pass sensitive URLs as webhook targets
+
+### Agent Autonomy
+- This skill is designed to be added to agent skills directories
+- The instructions to "clone into skills directory" are intentional for skill functionality
+- Agents should ask before installing new skills if not explicitly requested
+
+### Installation
+- For Bun: prefer OS package managers over `curl | bash` when possible
+- Verify any installer scripts before running
 
 ## Setup
 
@@ -44,12 +98,33 @@ xint tweet 1234567890                         # Fetch single tweet
 xint thread 1234567890                        # Fetch conversation thread
 ```
 
+### Article Fetching (requires XAI_API_KEY)
+
+Fetch and extract full article content from any URL using xAI's web_search tool. Also supports extracting linked articles from X tweets.
+
+```bash
+# Fetch article content
+xint article "https://example.com"
+
+# Fetch + analyze with AI
+xint article "https://example.com" --ai "Summarize key takeaways"
+
+# Auto-extract article from X tweet URL and analyze
+xint article "https://x.com/user/status/123456789" --ai "What are the main points?"
+
+# Full content without truncation
+xint article "https://example.com" --full
+
+# JSON output
+xint article "https://example.com" --json
+```
+
 ### Trends
 ```bash
 xint trends                                   # Worldwide trending
-xint trends us                                # US trends
-xint trends --json                            # JSON output
-xint trends --locations                       # List supported locations
+xint trends us                              # US trends
+xint trends --json                          # JSON output
+xint trends --locations                     # List supported locations
 ```
 
 ### AI Analysis (requires XAI_API_KEY)

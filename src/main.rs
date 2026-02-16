@@ -9,6 +9,7 @@ mod costs;
 mod format;
 mod models;
 mod sentiment;
+mod mcp;
 
 use anyhow::Result;
 use clap::Parser;
@@ -92,6 +93,9 @@ async fn main() -> Result<()> {
         }
         Some(Commands::Collections(args)) => {
             commands::collections::run(&args, &config).await?;
+        }
+        Some(Commands::Mcp(args)) => {
+            mcp::run(args).await?;
         }
         None => {
             // Show help when no command provided

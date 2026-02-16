@@ -1,29 +1,56 @@
 use anyhow::Result;
 
 use crate::api::xai;
+use crate::api::grok;
 use crate::cli::ArticleArgs;
 use crate::config::Config;
 use crate::models::Article;
 
 pub async fn run(args: &ArticleArgs, config: &Config) -> Result<()> {
-    let api_key = config.require_xai_key()?;
+    let xai_api_key = config.require_xai_key()?;
 
-    let parsed = url::Url::parse(&args.url)
-        .map_err(|_| anyhow::anyhow!("Invalid URL: {}", args.url))?;
+    let url = args.url.clone();
+
+    // Check if it's an X tweet URL - warn user
+    if url.contains("x.com/") && url.contains("/status/") {
+        println!("📝 X tweet URLs not supported in Rust version yet.");
+        println!("   Please provide a direct article URL.");
+        return Ok(());
+    }
+
+    let parsed = url::Url::parse(&url)
+        .map_err(|_| anyhow::anyhow!("Invalid URL: {}", url))?;
     let domain = parsed.host_str().unwrap_or("").to_string();
 
     let http = reqwest::Client::new();
     let raw = xai::web_search_article(
         &http,
-        api_key,
-        &args.url,
+        xai_api_key,
+        &url,
         &domain,
         &args.model,
         30,
     )
     .await?;
 
-    let article = parse_article_json(&raw, &args.url, &domain, args.full);
+    let article = parse_article_json(&raw, &url, &domain, args.full);
+
+    // If AI prompt provided, analyze the article
+    if let Some(ai_prompt) = &args.ai {
+        println!("🤖 Analyzing with Grok...\n");
+        
+        let analysis = grok::analyze_query(
+            &http,
+            xai_api_key,
+            ai_prompt,
+            Some(&article.content),
+            &crate::models::GrokOpts::default(),
+        ).await?;
+        
+        println!("📝 Analysis: {}\n", ai_prompt);
+        println!("{}", analysis.content);
+        println!("\n---");
+    }
 
     if args.json {
         println!("{}", serde_json::to_string_pretty(&article)?);

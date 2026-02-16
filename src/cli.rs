@@ -90,6 +90,10 @@ pub enum Commands {
     /// xAI Collections knowledge base management
     #[command(alias = "col")]
     Collections(CollectionsArgs),
+
+    /// Start MCP server for AI agents (Claude, OpenAI)
+    #[command(alias = "mcp-server")]
+    Mcp(McpArgs),
 }
 
 // ---------------------------------------------------------------------------
@@ -312,7 +316,7 @@ pub struct TweetArgs {
 
 #[derive(Parser)]
 pub struct ArticleArgs {
-    /// URL to fetch article from
+    /// URL to fetch article from (or X tweet URL for auto-extraction)
     pub url: String,
 
     /// JSON output
@@ -323,9 +327,13 @@ pub struct ArticleArgs {
     #[arg(long)]
     pub full: bool,
 
-    /// Grok model
-    #[arg(long, default_value = "grok-3-mini")]
+    /// Grok model (default: grok-4 for article fetching)
+    #[arg(long, default_value = "grok-4")]
     pub model: String,
+
+    /// Analyze article with Grok AI - ask a question about the content
+    #[arg(long, short = 'a')]
+    pub ai: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -595,4 +603,19 @@ pub struct CollectionsArgs {
     /// Top-K results for document search
     #[arg(long, default_value = "8")]
     pub top_k: u32,
+}
+
+// ---------------------------------------------------------------------------
+// MCP Server
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+pub struct McpArgs {
+    /// Run in SSE mode (HTTP server)
+    #[arg(long)]
+    pub sse: bool,
+    
+    /// Port for SSE mode (default: 3000)
+    #[arg(long, default_value = "3000")]
+    pub port: u16,
 }
