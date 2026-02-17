@@ -9,6 +9,8 @@ mod costs;
 mod format;
 mod mcp;
 mod models;
+mod output_meta;
+mod policy;
 mod sentiment;
 
 use anyhow::Result;
@@ -23,6 +25,14 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     let config = Config::load()?;
     let client = XClient::new()?;
+
+    if let Some(ref cmd) = cli.command {
+        let required = policy::required_mode(cmd);
+        if !policy::is_allowed(cli.policy, required) {
+            policy::emit_policy_denied(cmd, cli.policy, required);
+            std::process::exit(2);
+        }
+    }
 
     match cli.command {
         Some(Commands::Search(args)) => {

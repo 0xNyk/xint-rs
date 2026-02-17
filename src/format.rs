@@ -288,15 +288,3 @@ pub fn format_csv(tweets: &[Tweet]) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
-
-// ---------------------------------------------------------------------------
-// JSONL
-// ---------------------------------------------------------------------------
-
-pub fn format_jsonl(tweets: &[Tweet]) -> String {
-    tweets
-        .iter()
-        .filter_map(|t| serde_json::to_string(t).ok())
-        .collect::<Vec<_>>()
-        .join("\n")
-}

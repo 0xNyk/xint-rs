@@ -1,10 +1,22 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
 #[command(name = "xint", about = "X Intelligence CLI", version)]
 pub struct Cli {
+    /// Global policy mode for command allowlisting
+    #[arg(long, global = true, value_enum, default_value_t = PolicyMode::ReadOnly)]
+    pub policy: PolicyMode,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+#[value(rename_all = "snake_case")]
+pub enum PolicyMode {
+    ReadOnly,
+    Engagement,
+    Moderation,
 }
 
 #[derive(Subcommand)]

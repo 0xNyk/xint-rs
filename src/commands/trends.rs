@@ -7,6 +7,7 @@ use crate::client::XClient;
 use crate::config::Config;
 use crate::costs;
 use crate::models::*;
+use crate::output_meta;
 
 fn woeid_map() -> HashMap<&'static str, u32> {
     let mut m = HashMap::new();
@@ -106,6 +107,7 @@ fn resolve_woeid(input: &str) -> Result<u32> {
 }
 
 pub async fn run(args: &TrendsArgs, config: &Config, client: &XClient) -> Result<()> {
+    let started_at = std::time::Instant::now();
     let token = config.require_bearer_token()?;
 
     // --locations flag
@@ -145,7 +147,25 @@ pub async fn run(args: &TrendsArgs, config: &Config, client: &XClient) -> Result
             crate::cache::get(&config.cache_dir(), &cache_key, "", cache_ttl);
         if let Some(result) = cached {
             if args.json {
-                println!("{}", serde_json::to_string_pretty(&result)?);
+                let is_fallback = result.source == "search_fallback";
+                let meta = output_meta::build_meta(
+                    if is_fallback {
+                        "x_api_v2_search_fallback"
+                    } else {
+                        "x_api_v2"
+                    },
+                    started_at,
+                    true,
+                    if is_fallback { 0.7 } else { 1.0 },
+                    if is_fallback {
+                        "/2/tweets/search/recent"
+                    } else {
+                        "/2/trends/by/woeid"
+                    },
+                    0.0,
+                    &config.costs_path(),
+                );
+                output_meta::print_json_with_meta(&meta, &result)?;
             } else {
                 print_trends(&result, args.limit);
             }
@@ -229,7 +249,26 @@ pub async fn run(args: &TrendsArgs, config: &Config, client: &XClient) -> Result
     crate::cache::set(&config.cache_dir(), &cache_key, "", &result);
 
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&result)?);
+        let is_fallback = result.source == "search_fallback";
+        let estimated_cost = if is_fallback { 0.5 } else { 0.1 };
+        let meta = output_meta::build_meta(
+            if is_fallback {
+                "x_api_v2_search_fallback"
+            } else {
+                "x_api_v2"
+            },
+            started_at,
+            false,
+            if is_fallback { 0.7 } else { 1.0 },
+            if is_fallback {
+                "/2/tweets/search/recent"
+            } else {
+                "/2/trends/by/woeid"
+            },
+            estimated_cost,
+            &config.costs_path(),
+        );
+        output_meta::print_json_with_meta(&meta, &result)?;
     } else {
         print_trends(&result, args.limit);
     }

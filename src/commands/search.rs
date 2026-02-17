@@ -7,9 +7,11 @@ use crate::client::XClient;
 use crate::config::Config;
 use crate::costs;
 use crate::format;
+use crate::output_meta;
 use crate::sentiment;
 
 pub async fn run(args: &SearchArgs, config: &Config, client: &XClient) -> Result<()> {
+    let started_at = std::time::Instant::now();
     let token = config.require_bearer_token()?;
     let mut query = args.query.join(" ");
 
@@ -57,7 +59,9 @@ pub async fn run(args: &SearchArgs, config: &Config, client: &XClient) -> Result
     let cached: Option<Vec<crate::models::Tweet>> =
         crate::cache::get(&config.cache_dir(), &cache_key, &cache_params, cache_ttl);
 
+    let mut cache_hit = false;
     let mut tweets = if let Some(cached) = cached {
+        cache_hit = true;
         eprintln!("(cached — {} tweets)", cached.len());
         cached
     } else {
@@ -123,12 +127,33 @@ pub async fn run(args: &SearchArgs, config: &Config, client: &XClient) -> Result
     }
 
     // Output
+    let shown: Vec<_> = tweets.iter().take(limit).cloned().collect();
+    let endpoint = if args.full {
+        "/2/tweets/search/all"
+    } else {
+        "/2/tweets/search/recent"
+    };
+    let estimated_cost_usd = if cache_hit {
+        0.0
+    } else if args.full {
+        tweets.len() as f64 * 0.01
+    } else {
+        tweets.len() as f64 * 0.005
+    };
+    let meta = output_meta::build_meta(
+        "x_api_v2",
+        started_at,
+        cache_hit,
+        1.0,
+        endpoint,
+        estimated_cost_usd,
+        &config.costs_path(),
+    );
+
     if args.json {
-        let shown: Vec<_> = tweets.iter().take(limit).collect();
-        println!("{}", serde_json::to_string_pretty(&shown)?);
+        output_meta::print_json_with_meta(&meta, &shown)?;
     } else if args.jsonl {
-        let output = format::format_jsonl(&tweets[..tweets.len().min(limit)]);
-        println!("{output}");
+        output_meta::print_jsonl_with_meta(&meta, "tweet", &shown)?;
     } else if args.csv {
         let output = format::format_csv(&tweets[..tweets.len().min(limit)]);
         println!("{output}");

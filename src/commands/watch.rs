@@ -9,6 +9,7 @@ use crate::client::XClient;
 use crate::config::Config;
 use crate::costs;
 use crate::format;
+use crate::output_meta;
 
 fn parse_duration(s: &str) -> Option<u64> {
     let s = s.trim();
@@ -87,6 +88,7 @@ pub async fn run(args: &WatchArgs, config: &Config, client: &XClient) -> Result<
     let start_time = std::time::Instant::now();
 
     while running.load(Ordering::SeqCst) {
+        let poll_started_at = std::time::Instant::now();
         match twitter::search(
             client,
             token,
@@ -129,10 +131,28 @@ pub async fn run(args: &WatchArgs, config: &Config, client: &XClient) -> Result<
                     }
 
                     if args.jsonl {
+                        let meta = output_meta::build_meta(
+                            "x_api_v2",
+                            poll_started_at,
+                            false,
+                            1.0,
+                            "/2/tweets/search/recent",
+                            0.005,
+                            &config.costs_path(),
+                        );
                         for t in &limited {
-                            if let Ok(json) = serde_json::to_string(t) {
-                                println!("{json}");
-                            }
+                            let payload = serde_json::json!({
+                                "source": meta.source,
+                                "latency_ms": meta.latency_ms,
+                                "cached": meta.cached,
+                                "confidence": meta.confidence,
+                                "api_endpoint": meta.api_endpoint,
+                                "timestamp": meta.timestamp,
+                                "estimated_cost_usd": meta.estimated_cost_usd,
+                                "budget_remaining_usd": meta.budget_remaining_usd,
+                                "tweet": t
+                            });
+                            println!("{}", serde_json::to_string(&payload)?);
                         }
                     } else {
                         for t in &limited {

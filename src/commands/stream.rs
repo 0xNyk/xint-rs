@@ -9,6 +9,7 @@ use crate::config::Config;
 use crate::costs;
 use crate::format;
 use crate::models::RawResponse;
+use crate::output_meta;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 struct StreamRule {
@@ -121,10 +122,31 @@ pub async fn run_stream(args: &StreamArgs, config: &Config, client: &XClient) ->
                     "tweet": tweet_json,
                 });
 
+                let meta = output_meta::build_meta(
+                    "x_api_v2",
+                    start_time,
+                    false,
+                    1.0,
+                    "/2/tweets/search/stream",
+                    0.005,
+                    &config.costs_path(),
+                );
+
                 if args.json {
-                    println!("{}", serde_json::to_string_pretty(&event)?);
+                    output_meta::print_json_with_meta(&meta, &event)?;
                 } else if args.jsonl {
-                    println!("{}", serde_json::to_string(&event)?);
+                    let payload = serde_json::json!({
+                        "source": meta.source,
+                        "latency_ms": meta.latency_ms,
+                        "cached": meta.cached,
+                        "confidence": meta.confidence,
+                        "api_endpoint": meta.api_endpoint,
+                        "timestamp": meta.timestamp,
+                        "estimated_cost_usd": meta.estimated_cost_usd,
+                        "budget_remaining_usd": meta.budget_remaining_usd,
+                        "event": event
+                    });
+                    println!("{}", serde_json::to_string(&payload)?);
                 } else {
                     if !args.quiet {
                         let rule_count = event["matching_rules"]
