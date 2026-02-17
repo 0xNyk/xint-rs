@@ -63,6 +63,7 @@ cargo build --release
 | AI Analyze | `xint analyze "best?"` |
 | Report | `xint report "crypto"` |
 | Article | `xint article <url> --ai "summarize"` |
+| Capabilities | `xint capabilities --json` |
 
 ### Shorthands
 
@@ -96,6 +97,18 @@ For bookmarks, likes, follows, lists, blocks/mutes, follower tracking:
 ```bash
 X_CLIENT_ID=your_client_id
 xint auth setup
+```
+
+## Agent-Native Capabilities Manifest
+
+`xint-rs` ships a machine-readable manifest for agent allowlists and runtime tool selection:
+
+```bash
+# Pretty JSON
+xint capabilities
+
+# Compact JSON for machine ingestion
+xint capabilities --compact
 ```
 
 ## Search

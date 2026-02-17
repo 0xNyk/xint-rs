@@ -3,6 +3,7 @@ pub mod article;
 pub mod auth_cmd;
 pub mod bookmarks;
 pub mod cache_cmd;
+pub mod capabilities;
 pub mod collections;
 pub mod costs_cmd;
 pub mod diff;

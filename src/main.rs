@@ -103,6 +103,9 @@ async fn main() -> Result<()> {
         Some(Commands::Costs(args)) => {
             commands::costs_cmd::run(&args, &config)?;
         }
+        Some(Commands::Capabilities(args)) => {
+            commands::capabilities::run(&args)?;
+        }
         Some(Commands::Watchlist(args)) => {
             commands::watchlist::run(&args, &config)?;
         }

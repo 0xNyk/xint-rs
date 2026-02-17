@@ -101,6 +101,10 @@ pub enum Commands {
     #[command(alias = "cost")]
     Costs(CostsArgs),
 
+    /// Print machine-readable capability manifest
+    #[command(alias = "caps")]
+    Capabilities(CapabilitiesArgs),
+
     /// Manage watchlist
     #[command(alias = "wl")]
     Watchlist(WatchlistArgs),
@@ -661,6 +665,13 @@ pub struct AnalyzeArgs {
 pub struct CostsArgs {
     /// Subcommand: today, week, month, all, budget, reset
     pub subcommand: Option<Vec<String>>,
+}
+
+#[derive(Parser)]
+pub struct CapabilitiesArgs {
+    /// Compact single-line JSON output
+    #[arg(long)]
+    pub compact: bool,
 }
 
 // ---------------------------------------------------------------------------
