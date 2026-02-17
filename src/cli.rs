@@ -17,6 +17,13 @@ pub enum Commands {
     #[command(alias = "w")]
     Watch(WatchArgs),
 
+    /// Stream tweets via official X filtered stream (rules-based)
+    Stream(StreamArgs),
+
+    /// Manage official X filtered-stream rules
+    #[command(alias = "stream_rules")]
+    StreamRules(StreamRulesArgs),
+
     /// Track follower/following changes over time
     #[command(alias = "followers")]
     Diff(DiffArgs),
@@ -34,6 +41,9 @@ pub enum Commands {
 
     /// Fetch a single tweet
     Tweet(TweetArgs),
+
+    /// Download media from a tweet
+    Media(MediaArgs),
 
     /// Fetch and read full article content from a URL
     #[command(alias = "read")]
@@ -60,6 +70,24 @@ pub enum Commands {
 
     /// List accounts you follow (OAuth required)
     Following(FollowingArgs),
+
+    /// Manage blocked users (OAuth required)
+    #[command(alias = "block")]
+    Blocks(ModerationArgs),
+
+    /// Manage muted users (OAuth required)
+    #[command(alias = "mute")]
+    Mutes(ModerationArgs),
+
+    /// Follow a user (OAuth required)
+    Follow(FollowActionArgs),
+
+    /// Unfollow a user (OAuth required)
+    Unfollow(FollowActionArgs),
+
+    /// Manage your X lists (OAuth required)
+    #[command(alias = "list")]
+    Lists(ListsArgs),
 
     /// Fetch trending topics
     #[command(alias = "tr")]
@@ -216,6 +244,47 @@ pub struct WatchArgs {
     pub jsonl: bool,
 }
 
+#[derive(Parser)]
+pub struct StreamArgs {
+    /// Output structured JSON per event
+    #[arg(long)]
+    pub json: bool,
+
+    /// Output compact JSONL per event
+    #[arg(long)]
+    pub jsonl: bool,
+
+    /// Stop after N events
+    #[arg(long)]
+    pub max_events: Option<usize>,
+
+    /// Backfill minutes (1-5)
+    #[arg(long)]
+    pub backfill: Option<u8>,
+
+    /// POST stream events to this URL
+    #[arg(long)]
+    pub webhook: Option<String>,
+
+    /// Suppress stream status logs
+    #[arg(long, short = 'q')]
+    pub quiet: bool,
+}
+
+#[derive(Parser)]
+pub struct StreamRulesArgs {
+    /// Subcommand: list, add, delete, clear
+    pub subcommand: Option<Vec<String>>,
+
+    /// Optional tag for add
+    #[arg(long)]
+    pub tag: Option<String>,
+
+    /// JSON output
+    #[arg(long)]
+    pub json: bool,
+}
+
 // ---------------------------------------------------------------------------
 // Diff
 // ---------------------------------------------------------------------------
@@ -310,6 +379,36 @@ pub struct TweetArgs {
     pub tweet_id: String,
 
     /// JSON output
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Parser)]
+pub struct MediaArgs {
+    /// Tweet ID or tweet URL
+    pub target: String,
+
+    /// Output directory (default: data/media)
+    #[arg(long)]
+    pub dir: Option<String>,
+
+    /// Download up to N selected media items
+    #[arg(long)]
+    pub max_items: Option<usize>,
+
+    /// Filename template tokens: {tweet_id} {username} {index} {type} {media_key} {created_at} {ext}
+    #[arg(long)]
+    pub name_template: Option<String>,
+
+    /// Download photos only
+    #[arg(long)]
+    pub photos_only: bool,
+
+    /// Download videos/GIFs only
+    #[arg(long)]
+    pub video_only: bool,
+
+    /// JSON summary output
     #[arg(long)]
     pub json: bool,
 }
@@ -442,6 +541,64 @@ pub struct FollowingArgs {
     /// JSON output
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Parser)]
+pub struct ModerationArgs {
+    /// Subcommand: list, add, remove
+    pub subcommand: Option<Vec<String>>,
+
+    /// Max users to display for list command
+    #[arg(long, default_value = "50")]
+    pub limit: usize,
+
+    /// JSON output
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Parser)]
+pub struct FollowActionArgs {
+    /// Username (with or without @) or numeric user ID
+    pub target: String,
+
+    /// JSON output
+    #[arg(long)]
+    pub json: bool,
+}
+
+// ---------------------------------------------------------------------------
+// Lists
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+pub struct ListsArgs {
+    /// Subcommand: list, create, update, delete, members
+    pub subcommand: Option<Vec<String>>,
+
+    /// Max results for list/list-members commands
+    #[arg(long, default_value = "50")]
+    pub limit: usize,
+
+    /// JSON output
+    #[arg(long)]
+    pub json: bool,
+
+    /// Name for create/update
+    #[arg(long)]
+    pub name: Option<String>,
+
+    /// Description for create/update
+    #[arg(long)]
+    pub description: Option<String>,
+
+    /// Mark list private
+    #[arg(long)]
+    pub private: bool,
+
+    /// Mark list public
+    #[arg(long)]
+    pub public: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -614,7 +771,7 @@ pub struct McpArgs {
     /// Run in SSE mode (HTTP server)
     #[arg(long)]
     pub sse: bool,
-    
+
     /// Port for SSE mode (default: 3000)
     #[arg(long, default_value = "3000")]
     pub port: u16,

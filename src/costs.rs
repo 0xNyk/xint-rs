@@ -12,14 +12,21 @@ pub fn cost_rate(operation: &str) -> (f64, f64) {
         "search_archive" => (0.01, 0.0),
         "bookmarks" => (0.005, 0.0),
         "likes" => (0.005, 0.0),
-        "like" | "unlike" => (0.0, 0.01),
+        "like" | "unlike" | "follow" | "unfollow" => (0.0, 0.01),
         "following" => (0.0, 0.005),
+        "media_metadata" => (0.005, 0.0),
+        "stream_connect" => (0.005, 0.0),
+        "stream_rules_list" | "stream_rules_add" | "stream_rules_delete" => (0.0, 0.01),
         "bookmark_save" | "bookmark_remove" => (0.0, 0.01),
         "profile" => (0.005, 0.0),
         "tweet" => (0.005, 0.0),
         "trends" => (0.0, 0.10),
         "thread" => (0.005, 0.0),
         "followers" | "following_list" => (0.0, 0.01),
+        "lists_list" | "lists_create" | "lists_update" | "lists_delete" => (0.0, 0.01),
+        "list_members_list" | "list_members_add" | "list_members_remove" => (0.0, 0.01),
+        "blocks_list" | "blocks_add" | "blocks_remove" => (0.0, 0.01),
+        "mutes_list" | "mutes_add" | "mutes_remove" => (0.0, 0.01),
         _ => (0.005, 0.0),
     }
 }
@@ -51,16 +58,21 @@ fn today_str() -> String {
 }
 
 fn prune_entries(data: &mut CostData) {
-    let cutoff = (chrono::Utc::now() - chrono::Duration::days(RETENTION_DAYS))
-        .to_rfc3339();
+    let cutoff = (chrono::Utc::now() - chrono::Duration::days(RETENTION_DAYS)).to_rfc3339();
     let cutoff_day = &cutoff[..10];
 
-    data.entries.retain(|e| e.timestamp.as_str() >= cutoff.as_str());
+    data.entries
+        .retain(|e| e.timestamp.as_str() >= cutoff.as_str());
     data.daily.retain(|d| d.date.as_str() >= cutoff_day);
 }
 
 /// Track a cost entry for an API call.
-pub fn track_cost(costs_path: &Path, operation: &str, endpoint: &str, tweets_read: u64) -> CostEntry {
+pub fn track_cost(
+    costs_path: &Path,
+    operation: &str,
+    endpoint: &str,
+    tweets_read: u64,
+) -> CostEntry {
     let (per_tweet, per_call) = cost_rate(operation);
     let cost_usd = per_call + per_tweet * tweets_read as f64;
     let cost_usd = (cost_usd * 1e6).round() / 1e6;
@@ -78,10 +90,7 @@ pub fn track_cost(costs_path: &Path, operation: &str, endpoint: &str, tweets_rea
     data.total_lifetime_usd = ((data.total_lifetime_usd + cost_usd) * 1e6).round() / 1e6;
 
     let day = &entry.timestamp[..10];
-    let agg = data
-        .daily
-        .iter_mut()
-        .find(|d| d.date == day);
+    let agg = data.daily.iter_mut().find(|d| d.date == day);
 
     if let Some(agg) = agg {
         agg.total_cost += cost_usd;
@@ -155,7 +164,7 @@ pub fn set_budget(costs_path: &Path, limit_usd: f64) {
 pub fn reset_today(costs_path: &Path) {
     let mut data = load_data(costs_path);
     let today = today_str();
-    data.entries.retain(|e| &e.timestamp[..10] != today);
+    data.entries.retain(|e| e.timestamp[..10] != today);
     data.daily.retain(|d| d.date != today);
     save_data(costs_path, &data);
 }
@@ -237,8 +246,7 @@ pub fn get_cost_summary(costs_path: &Path, period: &str) -> String {
     let total_tweets: u64 = days.iter().map(|d| d.tweets_read).sum();
 
     let mut out = format!(
-        "\u{1f4ca} API Costs \u{2014} {}\n\n  Total: ${:.2} | Calls: {} | Tweets read: {}\n",
-        label, total_cost, total_calls, total_tweets
+        "\u{1f4ca} API Costs \u{2014} {label}\n\n  Total: ${total_cost:.2} | Calls: {total_calls} | Tweets read: {total_tweets}\n"
     );
 
     if period == "all" {
@@ -251,8 +259,7 @@ pub fn get_cost_summary(costs_path: &Path, period: &str) -> String {
     if !days.is_empty() {
         out.push_str(&format!(
             "\n  Daily breakdown:\n    {:<12} {:>8} {:>6} {:>7}\n    {:<12} {:>8} {:>6} {:>7}\n",
-            "Date", "Cost", "Calls", "Tweets",
-            "----", "----", "-----", "------"
+            "Date", "Cost", "Calls", "Tweets", "----", "----", "-----", "------"
         ));
         let mut sorted = days;
         sorted.sort_by(|a, b| b.date.cmp(&a.date));

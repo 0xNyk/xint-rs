@@ -1,5 +1,5 @@
-use anyhow::{bail, Result};
 use crate::models::*;
+use anyhow::{bail, Result};
 
 const XAI_ENDPOINT: &str = "https://api.x.ai/v1/chat/completions";
 
@@ -23,7 +23,7 @@ pub fn estimate_cost(model: &str, prompt_tokens: u64, completion_tokens: u64) ->
     if total < 0.0001 {
         "<$0.0001".to_string()
     } else {
-        format!("~${:.4}", total)
+        format!("~${total:.4}")
     }
 }
 
@@ -43,7 +43,7 @@ pub async fn grok_chat(
 
     let res = http
         .post(XAI_ENDPOINT)
-        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Authorization", format!("Bearer {api_key}"))
         .header("Content-Type", "application/json")
         .json(&body)
         .send()
@@ -62,7 +62,11 @@ pub async fn grok_chat(
     }
     if !res.status().is_success() {
         let text = res.text().await.unwrap_or_default();
-        bail!("xAI API error ({}): {}", status, &text[..text.len().min(200)]);
+        bail!(
+            "xAI API error ({}): {}",
+            status,
+            &text[..text.len().min(200)]
+        );
     }
 
     let data: serde_json::Value = res.json().await?;
@@ -80,12 +84,25 @@ pub async fn grok_chat(
         .to_string();
 
     let usage = GrokUsage {
-        prompt_tokens: data.pointer("/usage/prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
-        completion_tokens: data.pointer("/usage/completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
-        total_tokens: data.pointer("/usage/total_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+        prompt_tokens: data
+            .pointer("/usage/prompt_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0),
+        completion_tokens: data
+            .pointer("/usage/completion_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0),
+        total_tokens: data
+            .pointer("/usage/total_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0),
     };
 
-    Ok(GrokResponse { content, model, usage })
+    Ok(GrokResponse {
+        content,
+        model,
+        usage,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -94,7 +111,8 @@ pub async fn grok_chat(
 
 const TWEET_ANALYST_SYSTEM: &str = "You are a social media analyst specializing in X/Twitter. Provide concise, actionable insights. Use bullet points where appropriate. Focus on patterns, sentiment, and engagement signals.";
 
-const GENERAL_ANALYST_SYSTEM: &str = "You are a social media analyst. Provide concise, actionable insights.";
+const GENERAL_ANALYST_SYSTEM: &str =
+    "You are a social media analyst. Provide concise, actionable insights.";
 
 /// Format tweets as context for Grok analysis.
 pub fn format_tweets_for_context(tweets: &[Tweet]) -> String {
@@ -140,7 +158,12 @@ pub async fn analyze_tweets(
         },
         GrokMessage {
             role: "user".to_string(),
-            content: format!("Here are {} tweets:\n\n{}\n\n{}", tweets.len(), context, user_message),
+            content: format!(
+                "Here are {} tweets:\n\n{}\n\n{}",
+                tweets.len(),
+                context,
+                user_message
+            ),
         },
     ];
 
@@ -156,7 +179,7 @@ pub async fn analyze_query(
     opts: &GrokOpts,
 ) -> Result<GrokResponse> {
     let user_content = match context {
-        Some(ctx) => format!("Context:\n{}\n\nQuestion: {}", ctx, query),
+        Some(ctx) => format!("Context:\n{ctx}\n\nQuestion: {query}"),
         None => query.to_string(),
     };
 
@@ -201,8 +224,7 @@ pub async fn summarize_trends(
         GrokMessage {
             role: "user".to_string(),
             content: format!(
-                "These topics are currently trending on X/Twitter:\n\n{}\n\nExplain why each is trending and identify any connections between them.",
-                topic_list
+                "These topics are currently trending on X/Twitter:\n\n{topic_list}\n\nExplain why each is trending and identify any connections between them."
             ),
         },
     ];

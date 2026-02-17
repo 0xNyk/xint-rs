@@ -49,10 +49,16 @@ cargo build --release
 |------|---------|
 | Search | `xint search "AI agents"` |
 | Monitor | `xint watch "solana" -i 5m` |
+| Stream | `xint stream` |
 | Profile | `xint profile @elonmusk` |
 | Thread | `xint thread 123456789` |
 | Followers | `xint diff @username` |
 | Bookmarks | `xint bookmarks` |
+| Lists | `xint lists` |
+| Blocks | `xint blocks` |
+| Mutes | `xint mutes` |
+| Follow | `xint follow @username` |
+| Media | `xint media <tweet_id>` |
 | Trends | `xint trends` |
 | AI Analyze | `xint analyze "best?"` |
 | Report | `xint report "crypto"` |
@@ -85,7 +91,7 @@ XAI_API_KEY=your_xai_key
 
 ### Optional: OAuth
 
-For bookmarks, likes, follower tracking:
+For bookmarks, likes, follows, lists, blocks/mutes, follower tracking:
 
 ```bash
 X_CLIENT_ID=your_client_id
@@ -132,6 +138,22 @@ xint watch "news" -i 30s --webhook https://hooks.slack.com/...
 
 Press `Ctrl+C` — shows session stats.
 
+## Stream (Official Filtered Stream)
+
+```bash
+# List current stream rules
+xint stream-rules
+
+# Add a filtered-stream rule
+xint stream-rules add "from:elonmusk -is:retweet" --tag elon
+
+# Connect to stream
+xint stream
+
+# JSONL output and stop after 25 events
+xint stream --jsonl --max-events 25
+```
+
 ## Follower Tracking
 
 ```bash
@@ -141,6 +163,56 @@ xint diff @user --following
 ```
 
 Requires OAuth.
+
+## Lists (OAuth)
+
+```bash
+xint lists
+xint lists create "AI Researchers" --description "High-signal accounts" --private
+xint lists members add <list_id> @username
+xint lists members remove <list_id> @username
+```
+
+## Blocks & Mutes (OAuth)
+
+```bash
+xint blocks
+xint blocks add @username
+xint blocks remove @username
+
+xint mutes
+xint mutes add @username
+xint mutes remove @username
+```
+
+## Follow Actions (OAuth)
+
+```bash
+xint follow @username
+xint unfollow @username
+```
+
+## Media Download
+
+```bash
+# Download media from a tweet ID
+xint media 1900100012345678901
+
+# Download media from a tweet URL
+xint media https://x.com/user/status/1900100012345678901
+
+# Custom output directory + JSON summary
+xint media 1900100012345678901 --dir ./downloads --json
+
+# Download only first video/gif
+xint media 1900100012345678901 --video-only --max-items 1
+
+# Download only photos
+xint media 1900100012345678901 --photos-only
+
+# Custom filename template
+xint media 1900100012345678901 --name-template "{username}-{created_at}-{index}"
+```
 
 ## Reports & Analysis
 

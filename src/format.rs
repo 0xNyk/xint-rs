@@ -22,14 +22,14 @@ fn time_ago(date_str: &str) -> String {
     let diff = Utc::now().signed_duration_since(date);
     let mins = diff.num_minutes();
     if mins < 60 {
-        return format!("{}m", mins);
+        return format!("{mins}m");
     }
     let hours = diff.num_hours();
     if hours < 24 {
-        return format!("{}h", hours);
+        return format!("{hours}h");
     }
     let days = diff.num_days();
-    format!("{}d", days)
+    format!("{days}d")
 }
 
 fn clean_tco(text: &str) -> String {
@@ -73,7 +73,15 @@ pub fn format_tweet_terminal(t: &Tweet, index: Option<usize>, full: bool) -> Str
     let text = if full || t.text.len() <= 200 {
         t.text.clone()
     } else {
-        format!("{}...", &t.text[..t.text.char_indices().nth(197).map(|(i, _)| i).unwrap_or(t.text.len())])
+        format!(
+            "{}...",
+            &t.text[..t
+                .text
+                .char_indices()
+                .nth(197)
+                .map(|(i, _)| i)
+                .unwrap_or(t.text.len())]
+        )
     };
     let clean_text = clean_tco(&text);
 
@@ -84,10 +92,14 @@ pub fn format_tweet_terminal(t: &Tweet, index: Option<usize>, full: bool) -> Str
 
     if let Some(u) = t.urls.first() {
         if let Some(ref title) = u.title {
-            out.push_str(&format!("\n\u{1f4f0} \"{}\"", title));
+            out.push_str(&format!("\n\u{1f4f0} \"{title}\""));
             if let Some(ref desc) = u.description {
-                let short = if desc.len() > 120 { &desc[..120] } else { desc.as_str() };
-                out.push_str(&format!(" \u{2014} {}", short));
+                let short = if desc.len() > 120 {
+                    &desc[..120]
+                } else {
+                    desc.as_str()
+                };
+                out.push_str(&format!(" \u{2014} {short}"));
             }
         }
         out.push_str(&format!("\n\u{1f517} {}", u.url));
@@ -204,14 +216,10 @@ pub fn format_tweet_markdown(t: &Tweet) -> String {
     out
 }
 
-pub fn format_research_markdown(
-    query: &str,
-    tweets: &[Tweet],
-    queries: &[&str],
-) -> String {
+pub fn format_research_markdown(query: &str, tweets: &[Tweet], queries: &[&str]) -> String {
     let date = Utc::now().format("%Y-%m-%d").to_string();
-    let mut out = format!("# X Research: {}\n\n", query);
-    out.push_str(&format!("**Date:** {}\n", date));
+    let mut out = format!("# X Research: {query}\n\n");
+    out.push_str(&format!("**Date:** {date}\n"));
     out.push_str(&format!("**Tweets found:** {}\n\n", tweets.len()));
 
     out.push_str("## Top Results (by engagement)\n\n");
@@ -221,8 +229,8 @@ pub fn format_research_markdown(
     }
 
     out.push_str("---\n\n## Research Metadata\n");
-    out.push_str(&format!("- **Query:** {}\n", query));
-    out.push_str(&format!("- **Date:** {}\n", date));
+    out.push_str(&format!("- **Query:** {query}\n"));
+    out.push_str(&format!("- **Date:** {date}\n"));
     out.push_str(&format!("- **Tweets scanned:** {}\n", tweets.len()));
     out.push_str(&format!(
         "- **Est. cost:** ~${:.2}\n",
@@ -231,7 +239,7 @@ pub fn format_research_markdown(
     if !queries.is_empty() {
         out.push_str("- **Search queries:**\n");
         for q in queries {
-            out.push_str(&format!("  - `{}`\n", q));
+            out.push_str(&format!("  - `{q}`\n"));
         }
     }
 

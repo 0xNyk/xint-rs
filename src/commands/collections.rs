@@ -23,7 +23,7 @@ pub async fn run(args: &CollectionsArgs, config: &Config) -> Result<()> {
             Ok(())
         }
         _ => {
-            eprintln!("Unknown collections subcommand: {}", sub);
+            eprintln!("Unknown collections subcommand: {sub}");
             print_help();
             Ok(())
         }
@@ -57,11 +57,7 @@ async fn cmd_ensure(http: &reqwest::Client, config: &Config, parts: &[String]) -
     Ok(())
 }
 
-async fn cmd_add_document(
-    http: &reqwest::Client,
-    config: &Config,
-    parts: &[String],
-) -> Result<()> {
+async fn cmd_add_document(http: &reqwest::Client, config: &Config, parts: &[String]) -> Result<()> {
     let key = config.require_xai_management_key()?;
     let collection_id = find_flag(parts, "--collection-id")
         .ok_or_else(|| anyhow::anyhow!("--collection-id required"))?;
@@ -80,7 +76,7 @@ async fn cmd_upload(http: &reqwest::Client, config: &Config, parts: &[String]) -
 
     let path = PathBuf::from(&path_str);
     if !path.exists() {
-        bail!("File not found: {}", path_str);
+        bail!("File not found: {path_str}");
     }
 
     let res = xai::files_upload(http, api_key, &path, &purpose).await?;
@@ -122,11 +118,11 @@ async fn cmd_sync_dir(
     let collection_name = find_flag(&parts, "--collection-name")
         .or_else(|| find_flag(&parts, "--name"))
         .ok_or_else(|| anyhow::anyhow!("--collection-name required for sync-dir"))?;
-    let dir_str = find_flag(&parts, "--dir")
-        .ok_or_else(|| anyhow::anyhow!("--dir required for sync-dir"))?;
+    let dir_str =
+        find_flag(&parts, "--dir").ok_or_else(|| anyhow::anyhow!("--dir required for sync-dir"))?;
     let directory = PathBuf::from(&dir_str);
     if !directory.exists() {
-        bail!("Directory not found: {}", dir_str);
+        bail!("Directory not found: {dir_str}");
     }
 
     let globs: Vec<String> = {
@@ -145,12 +141,15 @@ async fn cmd_sync_dir(
     let ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
 
     // 1) Ensure collection
-    println!("Ensuring collection '{}'...", collection_name);
-    let ensure_res = xai::collections_ensure(http, mgmt_key, &collection_name, "xint KB sync").await?;
+    println!("Ensuring collection '{collection_name}'...");
+    let ensure_res =
+        xai::collections_ensure(http, mgmt_key, &collection_name, "xint KB sync").await?;
 
     let collection_id = extract_collection_id(&ensure_res);
     if collection_id.is_empty() {
-        eprintln!("WARN: could not determine collection_id from response; add-document step may fail.");
+        eprintln!(
+            "WARN: could not determine collection_id from response; add-document step may fail."
+        );
     }
 
     // 2) Enumerate files
@@ -196,7 +195,7 @@ async fn cmd_sync_dir(
 
     for p in &paths {
         let fname = p.file_name().and_then(|n| n.to_str()).unwrap_or("?");
-        print!("  Uploading {}... ", fname);
+        print!("  Uploading {fname}... ");
 
         match xai::files_upload(http, api_key, p, &purpose).await {
             Ok(up_res) => {
@@ -212,8 +211,8 @@ async fn cmd_sync_dir(
                             println!("uploaded + attached");
                         }
                         Err(e) => {
-                            println!("uploaded (attach failed: {})", e);
-                            failures.push(format!("{}: attach error: {}", fname, e));
+                            println!("uploaded (attach failed: {e})");
+                            failures.push(format!("{fname}: attach error: {e}"));
                         }
                     }
                 } else {
@@ -221,8 +220,8 @@ async fn cmd_sync_dir(
                 }
             }
             Err(e) => {
-                println!("FAILED: {}", e);
-                failures.push(format!("{}: {}", fname, e));
+                println!("FAILED: {e}");
+                failures.push(format!("{fname}: {e}"));
             }
         }
     }
@@ -235,24 +234,24 @@ async fn cmd_sync_dir(
     let mut lines = Vec::new();
     lines.push("# xAI Collections KB Sync".to_string());
     lines.push(String::new());
-    lines.push(format!("- Timestamp (UTC): {}", ts));
-    lines.push(format!("- Collection name: `{}`", collection_name));
+    lines.push(format!("- Timestamp (UTC): {ts}"));
+    lines.push(format!("- Collection name: `{collection_name}`"));
     lines.push(format!("- Directory: `{}`", directory.display()));
     lines.push(format!("- Globs: `{}`", globs.join(", ")));
-    lines.push(format!("- Limit: {}", limit));
+    lines.push(format!("- Limit: {limit}"));
     lines.push(String::new());
     lines.push("## Summary".to_string());
     lines.push(String::new());
     lines.push(format!("- Files considered: {}", paths.len()));
-    lines.push(format!("- Upload attempts: {}", uploaded));
-    lines.push(format!("- Attach attempts: {}", attached));
+    lines.push(format!("- Upload attempts: {uploaded}"));
+    lines.push(format!("- Attach attempts: {attached}"));
     lines.push(format!("- Failures: {}", failures.len()));
     lines.push(String::new());
     if !failures.is_empty() {
         lines.push("## Failures".to_string());
         lines.push(String::new());
         for f in &failures[..failures.len().min(50)] {
-            lines.push(format!("- {}", f));
+            lines.push(format!("- {f}"));
         }
         lines.push(String::new());
     }
@@ -284,7 +283,7 @@ fn find_flag(parts: &[String], flag: &str) -> Option<String> {
                 return Some(val.clone());
             }
         }
-        if let Some(rest) = p.strip_prefix(&format!("{}=", flag)) {
+        if let Some(rest) = p.strip_prefix(&format!("{flag}=")) {
             return Some(rest.to_string());
         }
     }
@@ -299,7 +298,7 @@ fn find_all_flags(parts: &[String], flag: &str) -> Vec<String> {
                 vals.push(val.clone());
             }
         }
-        if let Some(rest) = p.strip_prefix(&format!("{}=", flag)) {
+        if let Some(rest) = p.strip_prefix(&format!("{flag}=")) {
             vals.push(rest.to_string());
         }
     }
@@ -365,7 +364,7 @@ fn extract_document_id(res: &serde_json::Value) -> String {
 
 fn matches_simple_glob(name: &str, pattern: &str) -> bool {
     if let Some(ext) = pattern.strip_prefix("*.") {
-        name.ends_with(&format!(".{}", ext))
+        name.ends_with(&format!(".{ext}"))
     } else {
         name == pattern
     }

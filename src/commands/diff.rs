@@ -19,7 +19,11 @@ pub async fn run(args: &DiffArgs, config: &Config, client: &XClient) -> Result<(
         }
     };
 
-    let snap_type = if args.following { "following" } else { "followers" };
+    let snap_type = if args.following {
+        "following"
+    } else {
+        "followers"
+    };
     let snapshots_dir = config.snapshots_dir();
     fs::create_dir_all(&snapshots_dir)?;
 
@@ -28,19 +32,18 @@ pub async fn run(args: &DiffArgs, config: &Config, client: &XClient) -> Result<(
         let files = list_snapshots(&snapshots_dir, &username, snap_type);
         if files.is_empty() {
             println!(
-                "No {} snapshots for @{}. Run 'xint diff @{}' to create one.",
-                snap_type, username, username
+                "No {snap_type} snapshots for @{username}. Run 'xint diff @{username}' to create one."
             );
             return Ok(());
         }
-        println!("\nSnapshots for @{} ({}):\n", username, snap_type);
+        println!("\nSnapshots for @{username} ({snap_type}):\n");
         for f in &files {
             let path = snapshots_dir.join(f);
             if let Ok(content) = fs::read_to_string(&path) {
                 if let Ok(snap) = serde_json::from_str::<Snapshot>(&content) {
                     println!("  {} — {} {}", &snap.timestamp[..10], snap.count, snap_type);
                 } else {
-                    println!("  {} (corrupted)", f);
+                    println!("  {f} (corrupted)");
                 }
             }
         }
@@ -52,26 +55,23 @@ pub async fn run(args: &DiffArgs, config: &Config, client: &XClient) -> Result<(
     let (access_token, _tokens) =
         oauth::get_valid_token(client, &config.tokens_path(), client_id).await?;
 
-    eprintln!("Fetching {} for @{}...", snap_type, username);
+    eprintln!("Fetching {snap_type} for @{username}...");
 
     // Look up user ID
-    let lookup_path = format!(
-        "users/by/username/{}?user.fields=public_metrics",
-        username
-    );
+    let lookup_path = format!("users/by/username/{username}?user.fields=public_metrics");
     let raw = client.oauth_get(&lookup_path, &access_token).await?;
     let user_id = raw
         .data
         .as_ref()
         .and_then(|d| d.get("id"))
         .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow::anyhow!("User @{} not found", username))?
+        .ok_or_else(|| anyhow::anyhow!("User @{username} not found"))?
         .to_string();
 
     costs::track_cost(
         &config.costs_path(),
         "profile",
-        &format!("/2/users/by/username/{}", username),
+        &format!("/2/users/by/username/{username}"),
         1,
     );
 
@@ -81,7 +81,7 @@ pub async fn run(args: &DiffArgs, config: &Config, client: &XClient) -> Result<(
     costs::track_cost(
         &config.costs_path(),
         snap_type,
-        &format!("/2/users/{}/{}", user_id, snap_type),
+        &format!("/2/users/{user_id}/{snap_type}"),
         users.len() as u64,
     );
 
@@ -139,11 +139,11 @@ pub async fn run(args: &DiffArgs, config: &Config, client: &XClient) -> Result<(
                     .cmp(&a.followers_count.unwrap_or(0))
             });
             let top: Vec<_> = sorted.into_iter().take(20).collect();
-            println!("\nTop {} by follower count:\n", snap_type);
+            println!("\nTop {snap_type} by follower count:\n");
             for u in &top {
                 let fc = u
                     .followers_count
-                    .map(|n| format!("{} followers", n))
+                    .map(|n| format!("{n} followers"))
                     .unwrap_or_default();
                 println!("  @{} — {} ({})", u.username, u.name, fc);
             }
@@ -166,13 +166,10 @@ async fn fetch_user_list(
 
     for page in 0..max_pages {
         let pagination = match &next_token {
-            Some(t) => format!("&pagination_token={}", t),
+            Some(t) => format!("&pagination_token={t}"),
             None => String::new(),
         };
-        let path = format!(
-            "users/{}/{}?max_results=1000&{}{}",
-            user_id, snap_type, fields, pagination
-        );
+        let path = format!("users/{user_id}/{snap_type}?max_results=1000&{fields}{pagination}");
 
         let raw = client.oauth_get(&path, access_token).await?;
 
@@ -180,7 +177,11 @@ async fn fetch_user_list(
             if let Some(arr) = data.as_array() {
                 for u in arr {
                     users.push(UserSnapshot {
-                        id: u.get("id").and_then(|v| v.as_str()).unwrap_or("?").to_string(),
+                        id: u
+                            .get("id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("?")
+                            .to_string(),
                         username: u
                             .get("username")
                             .and_then(|v| v.as_str())
@@ -292,10 +293,7 @@ fn format_diff(diff: &FollowerDiff, snap_type: &str) -> String {
         "Following"
     };
 
-    let mut out = format!(
-        "\n{} Diff: {} -> {}\n",
-        label, prev_date, curr_date
-    );
+    let mut out = format!("\n{label} Diff: {prev_date} -> {curr_date}\n");
     out.push_str(&format!(
         "{} -> {} ({}{} net)\n",
         diff.previous.count, diff.current.count, sign, net_change
@@ -306,7 +304,7 @@ fn format_diff(diff: &FollowerDiff, snap_type: &str) -> String {
         for u in diff.added.iter().take(50) {
             let fc = u
                 .followers_count
-                .map(|n| format!(" ({} followers)", n))
+                .map(|n| format!(" ({n} followers)"))
                 .unwrap_or_default();
             out.push_str(&format!("  + @{}{}\n", u.username, fc));
         }

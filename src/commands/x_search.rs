@@ -49,7 +49,7 @@ pub async fn run(args: &XSearchArgs, config: &Config) -> Result<()> {
             }
             Err(e) => {
                 had_errors = true;
-                let err_msg = format!("{}", e);
+                let err_msg = format!("{e}");
                 per_query.push(QueryResult {
                     query: q.clone(),
                     results: Vec::new(),
@@ -68,7 +68,10 @@ pub async fn run(args: &XSearchArgs, config: &Config) -> Result<()> {
     if let Some(parent) = out_json.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&out_json, serde_json::to_string_pretty(&json_payload)? + "\n")?;
+    std::fs::write(
+        &out_json,
+        serde_json::to_string_pretty(&json_payload)? + "\n",
+    )?;
 
     // Write markdown report
     let combined_summary = per_query
@@ -116,7 +119,7 @@ pub async fn run(args: &XSearchArgs, config: &Config) -> Result<()> {
             workspace
                 .join("memory")
                 .join("candidates")
-                .join(format!("x-search-{}.jsonl", today))
+                .join(format!("x-search-{today}.jsonl"))
         } else {
             PathBuf::from(&args.candidates_out)
         };
@@ -138,7 +141,7 @@ pub async fn run(args: &XSearchArgs, config: &Config) -> Result<()> {
                     continue;
                 }
                 let source = if !url.is_empty() {
-                    format!("x_search:{}", url)
+                    format!("x_search:{url}")
                 } else {
                     use std::hash::{Hash, Hasher};
                     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -151,10 +154,10 @@ pub async fn run(args: &XSearchArgs, config: &Config) -> Result<()> {
 
                 let mut val = text.clone();
                 if !handle.is_empty() {
-                    val = format!("@{}: {}", handle, val);
+                    val = format!("@{handle}: {val}");
                 }
                 if !url.is_empty() {
-                    val = format!("{} ({})", val, url);
+                    val = format!("{val} ({url})");
                 }
                 if val.len() > 900 {
                     val.truncate(900);
@@ -179,7 +182,7 @@ pub async fn run(args: &XSearchArgs, config: &Config) -> Result<()> {
                 .append(true)
                 .open(&cand_out)?;
             for line in &new_lines {
-                writeln!(f, "{}", line)?;
+                writeln!(f, "{line}")?;
             }
         }
         println!("New memory candidates: {}", new_lines.len());
@@ -260,7 +263,7 @@ fn render_md(ts: &str, queries: &[String], per_query: &[QueryResult], summary: &
     let mut lines = Vec::new();
     lines.push("# xAI X Search Scan".to_string());
     lines.push(String::new());
-    lines.push(format!("- Timestamp (UTC): {}", ts));
+    lines.push(format!("- Timestamp (UTC): {ts}"));
     lines.push(format!("- Queries: {}", queries.len()));
     lines.push(String::new());
 
@@ -278,7 +281,7 @@ fn render_md(ts: &str, queries: &[String], per_query: &[QueryResult], summary: &
         lines.push(format!("### Query: `{}`", qr.query));
         lines.push(String::new());
         if let Some(err) = &qr.error {
-            lines.push(format!("- ERROR: {}", err));
+            lines.push(format!("- ERROR: {err}"));
             lines.push(String::new());
             continue;
         }
@@ -300,18 +303,18 @@ fn render_md(ts: &str, queries: &[String], per_query: &[QueryResult], summary: &
             let prefix = if handle.is_empty() {
                 String::new()
             } else {
-                format!("@{}: ", handle)
+                format!("@{handle}: ")
             };
             let meta = if created_at.is_empty() {
                 String::new()
             } else {
-                format!(" ({})", created_at)
+                format!(" ({created_at})")
             };
 
             if url.is_empty() {
-                lines.push(format!("- {}{}{}", prefix, text, meta));
+                lines.push(format!("- {prefix}{text}{meta}"));
             } else {
-                lines.push(format!("- {}{}{} {}", prefix, text, meta, url));
+                lines.push(format!("- {prefix}{text}{meta} {url}"));
             }
         }
         lines.push(String::new());

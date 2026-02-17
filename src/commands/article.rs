@@ -1,7 +1,7 @@
 use anyhow::Result;
 
-use crate::api::xai;
 use crate::api::grok;
+use crate::api::xai;
 use crate::cli::ArticleArgs;
 use crate::config::Config;
 use crate::models::Article;
@@ -18,36 +18,28 @@ pub async fn run(args: &ArticleArgs, config: &Config) -> Result<()> {
         return Ok(());
     }
 
-    let parsed = url::Url::parse(&url)
-        .map_err(|_| anyhow::anyhow!("Invalid URL: {}", url))?;
+    let parsed = url::Url::parse(&url).map_err(|_| anyhow::anyhow!("Invalid URL: {url}"))?;
     let domain = parsed.host_str().unwrap_or("").to_string();
 
     let http = reqwest::Client::new();
-    let raw = xai::web_search_article(
-        &http,
-        xai_api_key,
-        &url,
-        &domain,
-        &args.model,
-        30,
-    )
-    .await?;
+    let raw = xai::web_search_article(&http, xai_api_key, &url, &domain, &args.model, 30).await?;
 
     let article = parse_article_json(&raw, &url, &domain, args.full);
 
     // If AI prompt provided, analyze the article
     if let Some(ai_prompt) = &args.ai {
         println!("🤖 Analyzing with Grok...\n");
-        
+
         let analysis = grok::analyze_query(
             &http,
             xai_api_key,
             ai_prompt,
             Some(&article.content),
             &crate::models::GrokOpts::default(),
-        ).await?;
-        
-        println!("📝 Analysis: {}\n", ai_prompt);
+        )
+        .await?;
+
+        println!("📝 Analysis: {ai_prompt}\n");
         println!("{}", analysis.content);
         println!("\n---");
     }
@@ -76,11 +68,26 @@ fn parse_article_json(raw: &str, url: &str, domain: &str, full: bool) -> Article
     let (title, description, mut content, author, published) =
         match serde_json::from_str::<serde_json::Value>(&cleaned) {
             Ok(v) => (
-                v.get("title").and_then(|v| v.as_str()).unwrap_or(domain).to_string(),
-                v.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                v.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                v.get("author").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                v.get("published").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                v.get("title")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(domain)
+                    .to_string(),
+                v.get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                v.get("content")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                v.get("author")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                v.get("published")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
             ),
             Err(_) => (
                 domain.to_string(),
@@ -110,7 +117,7 @@ fn parse_article_json(raw: &str, url: &str, domain: &str, full: bool) -> Article
         published,
         domain: domain.to_string(),
         ttr,
-        word_count: word_count,
+        word_count,
     }
 }
 
@@ -121,7 +128,11 @@ fn format_article(article: &Article) -> String {
     }
     if !article.published.is_empty() {
         let date = if article.published.contains('T') {
-            article.published.split('T').next().unwrap_or(&article.published)
+            article
+                .published
+                .split('T')
+                .next()
+                .unwrap_or(&article.published)
         } else {
             &article.published
         };

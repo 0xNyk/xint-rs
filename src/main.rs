@@ -7,9 +7,9 @@ mod commands;
 mod config;
 mod costs;
 mod format;
+mod mcp;
 mod models;
 mod sentiment;
-mod mcp;
 
 use anyhow::Result;
 use clap::Parser;
@@ -31,6 +31,12 @@ async fn main() -> Result<()> {
         Some(Commands::Watch(args)) => {
             commands::watch::run(&args, &config, &client).await?;
         }
+        Some(Commands::Stream(args)) => {
+            commands::stream::run_stream(&args, &config, &client).await?;
+        }
+        Some(Commands::StreamRules(args)) => {
+            commands::stream::run_stream_rules(&args, &config, &client).await?;
+        }
         Some(Commands::Diff(args)) => {
             commands::diff::run(&args, &config, &client).await?;
         }
@@ -45,6 +51,9 @@ async fn main() -> Result<()> {
         }
         Some(Commands::Tweet(args)) => {
             commands::tweet::run(&args, &config, &client).await?;
+        }
+        Some(Commands::Media(args)) => {
+            commands::media::run(&args, &config, &client).await?;
         }
         Some(Commands::Article(args)) => {
             commands::article::run(&args, &config).await?;
@@ -69,6 +78,21 @@ async fn main() -> Result<()> {
         }
         Some(Commands::Following(args)) => {
             commands::engagement::run_following(&args, &config, &client).await?;
+        }
+        Some(Commands::Blocks(args)) => {
+            commands::moderation::run_blocks(&args, &config, &client).await?;
+        }
+        Some(Commands::Mutes(args)) => {
+            commands::moderation::run_mutes(&args, &config, &client).await?;
+        }
+        Some(Commands::Follow(args)) => {
+            commands::engagement::run_follow(&args, &config, &client).await?;
+        }
+        Some(Commands::Unfollow(args)) => {
+            commands::engagement::run_unfollow(&args, &config, &client).await?;
+        }
+        Some(Commands::Lists(args)) => {
+            commands::lists::run(&args, &config, &client).await?;
         }
         Some(Commands::Trends(args)) => {
             commands::trends::run(&args, &config, &client).await?;

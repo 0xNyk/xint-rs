@@ -26,9 +26,7 @@ fn parse_duration(s: &str) -> Option<u64> {
 }
 
 fn now_display() -> String {
-    chrono::Utc::now()
-        .format("%Y-%m-%d %H:%M:%S")
-        .to_string()
+    chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
 pub async fn run(args: &WatchArgs, config: &Config, client: &XClient) -> Result<()> {
@@ -50,8 +48,12 @@ pub async fn run(args: &WatchArgs, config: &Config, client: &XClient) -> Result<
         query.push_str(" -is:retweet");
     }
 
-    let interval_ms = parse_duration(&args.interval)
-        .ok_or_else(|| anyhow::anyhow!("Invalid interval: {}. Use format: 30s, 5m, 1h", args.interval))?;
+    let interval_ms = parse_duration(&args.interval).ok_or_else(|| {
+        anyhow::anyhow!(
+            "Invalid interval: {}. Use format: 30s, 5m, 1h",
+            args.interval
+        )
+    })?;
 
     if interval_ms < 10_000 {
         bail!("Minimum interval is 10s");
@@ -72,9 +74,9 @@ pub async fn run(args: &WatchArgs, config: &Config, client: &XClient) -> Result<
         format!("{}s", interval_ms / 1000)
     };
 
-    eprintln!("\nWatching: \"{}\" every {}", query, interval_str);
+    eprintln!("\nWatching: \"{query}\" every {interval_str}");
     if let Some(ref wh) = args.webhook {
-        eprintln!("Webhook: {}", wh);
+        eprintln!("Webhook: {wh}");
     }
     eprintln!("Press Ctrl+C to stop\n");
 
@@ -108,8 +110,11 @@ pub async fn run(args: &WatchArgs, config: &Config, client: &XClient) -> Result<
                 );
                 poll_count += 1;
 
-                let new_tweets: Vec<_> =
-                    tweets.iter().filter(|t| !seen_ids.contains(&t.id)).cloned().collect();
+                let new_tweets: Vec<_> = tweets
+                    .iter()
+                    .filter(|t| !seen_ids.contains(&t.id))
+                    .cloned()
+                    .collect();
 
                 for t in &tweets {
                     seen_ids.insert(t.id.clone());
@@ -126,7 +131,7 @@ pub async fn run(args: &WatchArgs, config: &Config, client: &XClient) -> Result<
                     if args.jsonl {
                         for t in &limited {
                             if let Ok(json) = serde_json::to_string(t) {
-                                println!("{}", json);
+                                println!("{json}");
                             }
                         }
                     } else {
@@ -154,7 +159,7 @@ pub async fn run(args: &WatchArgs, config: &Config, client: &XClient) -> Result<
                             })).collect::<Vec<_>>(),
                         });
                         if let Err(e) = client.post_json(webhook_url, &payload).await {
-                            eprintln!("[webhook] Failed: {}", e);
+                            eprintln!("[webhook] Failed: {e}");
                         }
                     }
                 } else if poll_count == 1 {
@@ -201,8 +206,7 @@ pub async fn run(args: &WatchArgs, config: &Config, client: &XClient) -> Result<
     let secs = elapsed % 60;
     eprintln!("\n--- Watch stopped ---");
     eprintln!(
-        "Duration: {}m {}s | Polls: {} | New tweets: {} | Est. cost: ~${:.3}",
-        mins, secs, poll_count, total_new, total_cost
+        "Duration: {mins}m {secs}s | Polls: {poll_count} | New tweets: {total_new} | Est. cost: ~${total_cost:.3}"
     );
 
     Ok(())

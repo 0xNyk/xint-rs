@@ -36,7 +36,7 @@ pub async fn run_likes(args: &LikesArgs, config: &Config, client: &XClient) -> R
         while all.len() < fetch_count {
             let per_page = (fetch_count - all.len()).min(100);
             let pagination = match &next_token {
-                Some(t) => format!("&pagination_token={}", t),
+                Some(t) => format!("&pagination_token={t}"),
                 None => String::new(),
             };
             let path = format!(
@@ -86,8 +86,7 @@ pub async fn run_likes(args: &LikesArgs, config: &Config, client: &XClient) -> R
     if let Some(ref q) = args.query {
         let q_lower = q.to_lowercase();
         tweets.retain(|t| {
-            t.text.to_lowercase().contains(&q_lower)
-                || t.username.to_lowercase().contains(&q_lower)
+            t.text.to_lowercase().contains(&q_lower) || t.username.to_lowercase().contains(&q_lower)
         });
     }
 
@@ -181,7 +180,12 @@ pub async fn run_bookmark(args: &BookmarkArgs, config: &Config, client: &XClient
     let path = format!("users/{}/bookmarks", tokens.user_id);
     let result = client.oauth_post(&path, &access_token, Some(&body)).await?;
 
-    costs::track_cost(&config.costs_path(), "bookmark_save", "/2/users/bookmarks", 0);
+    costs::track_cost(
+        &config.costs_path(),
+        "bookmark_save",
+        "/2/users/bookmarks",
+        0,
+    );
 
     if result.pointer("/data/bookmarked") == Some(&serde_json::Value::Bool(true)) {
         println!("Bookmarked tweet {}", args.tweet_id);
@@ -242,17 +246,14 @@ pub async fn run_following(args: &FollowingArgs, config: &Config, client: &XClie
         if username.eq_ignore_ascii_case(&tokens.username) {
             (tokens.user_id.clone(), tokens.username.clone())
         } else {
-            let path = format!(
-                "users/by/username/{}?user.fields=public_metrics",
-                username
-            );
+            let path = format!("users/by/username/{username}?user.fields=public_metrics");
             let raw = client.oauth_get(&path, &access_token).await?;
             let id = raw
                 .data
                 .as_ref()
                 .and_then(|d| d.get("id"))
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("User @{} not found", username))?
+                .ok_or_else(|| anyhow::anyhow!("User @{username} not found"))?
                 .to_string();
             (id, username.to_string())
         }
@@ -267,13 +268,10 @@ pub async fn run_following(args: &FollowingArgs, config: &Config, client: &XClie
     while all_users.len() < args.limit {
         let per_page = (args.limit - all_users.len()).min(1000);
         let pagination = match &next_token {
-            Some(t) => format!("&pagination_token={}", t),
+            Some(t) => format!("&pagination_token={t}"),
             None => String::new(),
         };
-        let path = format!(
-            "users/{}/following?max_results={}&{}{}",
-            user_id, per_page, fields, pagination
-        );
+        let path = format!("users/{user_id}/following?max_results={per_page}&{fields}{pagination}");
 
         let raw = client.oauth_get(&path, &access_token).await?;
 
@@ -289,12 +287,7 @@ pub async fn run_following(args: &FollowingArgs, config: &Config, client: &XClie
         }
     }
 
-    costs::track_cost(
-        &config.costs_path(),
-        "following",
-        "/2/users/following",
-        0,
-    );
+    costs::track_cost(&config.costs_path(), "following", "/2/users/following", 0);
 
     all_users.truncate(args.limit);
 
@@ -316,7 +309,7 @@ pub async fn run_following(args: &FollowingArgs, config: &Config, client: &XClie
             .pointer("/public_metrics/followers_count")
             .and_then(|v| v.as_u64());
         let followers_str = match followers {
-            Some(n) => format!(" ({} followers)", n),
+            Some(n) => format!(" ({n} followers)"),
             None => String::new(),
         };
         println!("{}. @{} — {}{}", i + 1, username, name, followers_str);
@@ -330,4 +323,100 @@ pub async fn run_following(args: &FollowingArgs, config: &Config, client: &XClie
     }
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Follow / Unfollow (write)
+// ---------------------------------------------------------------------------
+
+pub async fn run_follow(args: &FollowActionArgs, config: &Config, client: &XClient) -> Result<()> {
+    let client_id = config.require_client_id()?;
+    let (access_token, tokens) =
+        oauth::get_valid_token(client, &config.tokens_path(), client_id).await?;
+
+    let (target_user_id, target_username) =
+        resolve_target_user(client, &access_token, &args.target).await?;
+    let body = serde_json::json!({ "target_user_id": target_user_id });
+    let path = format!("users/{}/following", tokens.user_id);
+    let result = client.oauth_post(&path, &access_token, Some(&body)).await?;
+
+    costs::track_cost(&config.costs_path(), "follow", "/2/users/following", 0);
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&result)?);
+    } else {
+        let success = result.pointer("/data/following") == Some(&serde_json::Value::Bool(true))
+            || result.get("success").is_some();
+        if success {
+            println!("Following @{target_username}");
+        } else {
+            eprintln!("Failed to follow @{target_username}");
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn run_unfollow(
+    args: &FollowActionArgs,
+    config: &Config,
+    client: &XClient,
+) -> Result<()> {
+    let client_id = config.require_client_id()?;
+    let (access_token, tokens) =
+        oauth::get_valid_token(client, &config.tokens_path(), client_id).await?;
+
+    let (target_user_id, target_username) =
+        resolve_target_user(client, &access_token, &args.target).await?;
+    let path = format!("users/{}/following/{}", tokens.user_id, target_user_id);
+    let result = client.oauth_delete(&path, &access_token).await?;
+
+    costs::track_cost(&config.costs_path(), "unfollow", "/2/users/following", 0);
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&result)?);
+    } else {
+        let success = result.pointer("/data/following") == Some(&serde_json::Value::Bool(false))
+            || result.get("success").is_some();
+        if success {
+            println!("Unfollowed @{target_username}");
+        } else {
+            eprintln!("Failed to unfollow @{target_username}");
+        }
+    }
+
+    Ok(())
+}
+
+async fn resolve_target_user(
+    client: &XClient,
+    access_token: &str,
+    input: &str,
+) -> Result<(String, String)> {
+    let candidate = input.trim_start_matches('@');
+    if is_likely_user_id(candidate) {
+        return Ok((candidate.to_string(), candidate.to_string()));
+    }
+
+    let path = format!("users/by/username/{candidate}?user.fields=public_metrics");
+    let raw = client.oauth_get(&path, access_token).await?;
+    let data = raw
+        .data
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("User @{candidate} not found"))?;
+
+    let id = data
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("User @{candidate} not found"))?;
+    let username = data
+        .get("username")
+        .and_then(|v| v.as_str())
+        .unwrap_or(candidate);
+
+    Ok((id.to_string(), username.to_string()))
+}
+
+fn is_likely_user_id(input: &str) -> bool {
+    !input.is_empty() && input.chars().all(|c| c.is_ascii_digit())
 }

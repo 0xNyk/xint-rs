@@ -81,6 +81,7 @@ impl XSearchResult {
 }
 
 /// Call xAI Responses API with x_search tool to search X.
+#[allow(clippy::too_many_arguments)]
 pub async fn x_search(
     http: &reqwest::Client,
     api_key: &str,
@@ -114,11 +115,11 @@ pub async fn x_search(
         "max_output_tokens": 800,
     });
 
-    let url = format!("{}/responses", API_BASE);
+    let url = format!("{API_BASE}/responses");
 
     let res = http
         .post(&url)
-        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Authorization", format!("Bearer {api_key}"))
         .header("Content-Type", "application/json")
         .timeout(std::time::Duration::from_secs(timeout_secs))
         .json(&body)
@@ -137,7 +138,11 @@ pub async fn x_search(
     }
     if !res.status().is_success() {
         let text = res.text().await.unwrap_or_default();
-        bail!("xAI API error ({}): {}", status, &text[..text.len().min(500)]);
+        bail!(
+            "xAI API error ({}): {}",
+            status,
+            &text[..text.len().min(500)]
+        );
     }
 
     let data: serde_json::Value = res.json().await?;
@@ -204,8 +209,7 @@ pub async fn web_search_article(
          - content: the full article text (plain text, no HTML)\n\
          - author: author name (empty string if unknown)\n\
          - published: publication date (empty string if unknown)\n\n\
-         Return ONLY valid JSON, no markdown fences, no explanation.\n\nURL: {}",
-        url
+         Return ONLY valid JSON, no markdown fences, no explanation.\n\nURL: {url}"
     );
 
     let body = serde_json::json!({
@@ -220,11 +224,11 @@ pub async fn web_search_article(
         }],
     });
 
-    let api_url = format!("{}/responses", API_BASE);
+    let api_url = format!("{API_BASE}/responses");
 
     let res = http
         .post(&api_url)
-        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Authorization", format!("Bearer {api_key}"))
         .header("Content-Type", "application/json")
         .timeout(std::time::Duration::from_secs(timeout_secs))
         .json(&body)
@@ -234,7 +238,11 @@ pub async fn web_search_article(
     let status = res.status().as_u16();
     if !res.status().is_success() {
         let text = res.text().await.unwrap_or_default();
-        bail!("xAI API error ({}): {}", status, &text[..text.len().min(500)]);
+        bail!(
+            "xAI API error ({}): {}",
+            status,
+            &text[..text.len().min(500)]
+        );
     }
 
     let data: serde_json::Value = res.json().await?;
@@ -268,7 +276,7 @@ pub async fn web_search_article(
         }
     }
 
-    bail!("No content returned for {}", url)
+    bail!("No content returned for {url}")
 }
 
 // ---------------------------------------------------------------------------
@@ -276,14 +284,11 @@ pub async fn web_search_article(
 // ---------------------------------------------------------------------------
 
 /// List all collections (Management API).
-pub async fn collections_list(
-    http: &reqwest::Client,
-    mgmt_key: &str,
-) -> Result<serde_json::Value> {
-    let url = format!("{}/collections", MGMT_BASE);
+pub async fn collections_list(http: &reqwest::Client, mgmt_key: &str) -> Result<serde_json::Value> {
+    let url = format!("{MGMT_BASE}/collections");
     let res = http
         .get(&url)
-        .header("Authorization", format!("Bearer {}", mgmt_key))
+        .header("Authorization", format!("Bearer {mgmt_key}"))
         .send()
         .await?;
 
@@ -297,7 +302,7 @@ pub async fn collections_create(
     name: &str,
     description: &str,
 ) -> Result<serde_json::Value> {
-    let url = format!("{}/collections", MGMT_BASE);
+    let url = format!("{MGMT_BASE}/collections");
     let mut body = serde_json::json!({"name": name});
     if !description.is_empty() {
         body["description"] = serde_json::Value::String(description.to_string());
@@ -305,7 +310,7 @@ pub async fn collections_create(
 
     let res = http
         .post(&url)
-        .header("Authorization", format!("Bearer {}", mgmt_key))
+        .header("Authorization", format!("Bearer {mgmt_key}"))
         .header("Content-Type", "application/json")
         .json(&body)
         .send()
@@ -342,18 +347,18 @@ pub async fn collections_add_document(
     collection_id: &str,
     document_id: &str,
 ) -> Result<serde_json::Value> {
-    let url = format!("{}/collections/{}/documents", MGMT_BASE, collection_id);
+    let url = format!("{MGMT_BASE}/collections/{collection_id}/documents");
     let body = serde_json::json!({"document_id": document_id});
 
     let res = http
         .post(&url)
-        .header("Authorization", format!("Bearer {}", mgmt_key))
+        .header("Authorization", format!("Bearer {mgmt_key}"))
         .header("Content-Type", "application/json")
         .json(&body)
         .send()
         .await?;
 
-    handle_xai_response(res, &format!("POST /collections/{}/documents", collection_id)).await
+    handle_xai_response(res, &format!("POST /collections/{collection_id}/documents")).await
 }
 
 /// Upload a file to xAI (Files API).
@@ -363,7 +368,7 @@ pub async fn files_upload(
     file_path: &std::path::Path,
     purpose: &str,
 ) -> Result<serde_json::Value> {
-    let url = format!("{}/files", API_BASE);
+    let url = format!("{API_BASE}/files");
 
     let file_name = file_path
         .file_name()
@@ -385,7 +390,7 @@ pub async fn files_upload(
 
     let res = http
         .post(&url)
-        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Authorization", format!("Bearer {api_key}"))
         .multipart(form)
         .timeout(std::time::Duration::from_secs(90))
         .send()
@@ -402,7 +407,7 @@ pub async fn documents_search(
     query: &str,
     top_k: u32,
 ) -> Result<serde_json::Value> {
-    let url = format!("{}/documents/search", API_BASE);
+    let url = format!("{API_BASE}/documents/search");
     let mut body = serde_json::json!({
         "query": query,
         "top_k": top_k,
@@ -418,7 +423,7 @@ pub async fn documents_search(
 
     let res = http
         .post(&url)
-        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Authorization", format!("Bearer {api_key}"))
         .header("Content-Type", "application/json")
         .json(&body)
         .send()
@@ -434,7 +439,7 @@ pub async fn documents_search(
 async fn handle_xai_response(res: reqwest::Response, context: &str) -> Result<serde_json::Value> {
     let status = res.status().as_u16();
     if status == 401 {
-        bail!("xAI auth failed (401) on {}. Check your API key.", context);
+        bail!("xAI auth failed (401) on {context}. Check your API key.");
     }
     if status == 402 {
         bail!("xAI payment required (402). Your account may be out of credits.");

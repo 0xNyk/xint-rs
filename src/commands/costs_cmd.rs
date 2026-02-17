@@ -5,11 +5,7 @@ use crate::config::Config;
 use crate::costs;
 
 pub fn run(args: &CostsArgs, config: &Config) -> Result<()> {
-    let parts: Vec<String> = args
-        .subcommand
-        .as_ref()
-        .map(|v| v.clone())
-        .unwrap_or_default();
+    let parts: Vec<String> = args.subcommand.clone().unwrap_or_default();
 
     let sub = parts.first().map(|s| s.as_str()).unwrap_or("today");
 
@@ -33,9 +29,9 @@ pub fn run(args: &CostsArgs, config: &Config) -> Result<()> {
                     let limit: f64 = v
                         .trim_start_matches('$')
                         .parse()
-                        .map_err(|_| anyhow::anyhow!("Invalid budget amount: {}", v))?;
+                        .map_err(|_| anyhow::anyhow!("Invalid budget amount: {v}"))?;
                     costs::set_budget(&config.costs_path(), limit);
-                    println!("Daily budget set to ${:.2}", limit);
+                    println!("Daily budget set to ${limit:.2}");
                 }
                 None => {
                     let status = costs::check_budget(&config.costs_path());

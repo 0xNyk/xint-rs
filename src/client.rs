@@ -27,17 +27,88 @@ impl XClient {
         let url = if path.starts_with("http") {
             path.to_string()
         } else {
-            format!("{}/{}", BASE_URL, path)
+            format!("{BASE_URL}/{path}")
         };
 
         let res = self
             .http
             .get(&url)
-            .header(AUTHORIZATION, format!("Bearer {}", token))
+            .header(AUTHORIZATION, format!("Bearer {token}"))
             .send()
             .await?;
 
         handle_response(res).await
+    }
+
+    /// Bearer-authenticated POST request.
+    pub async fn bearer_post(
+        &self,
+        path: &str,
+        token: &str,
+        body: Option<&serde_json::Value>,
+    ) -> Result<serde_json::Value> {
+        tokio::time::sleep(Duration::from_millis(RATE_DELAY_MS)).await;
+
+        let url = if path.starts_with("http") {
+            path.to_string()
+        } else {
+            format!("{BASE_URL}/{path}")
+        };
+
+        let mut req = self
+            .http
+            .post(&url)
+            .header(AUTHORIZATION, format!("Bearer {token}"));
+
+        if let Some(b) = body {
+            req = req.header(CONTENT_TYPE, "application/json").json(b);
+        }
+
+        let res = req.send().await?;
+        handle_json_response(res, "Bearer token rejected (401). Check X_BEARER_TOKEN.").await
+    }
+
+    /// Bearer-authenticated streaming GET request.
+    pub async fn bearer_stream(&self, path: &str, token: &str) -> Result<reqwest::Response> {
+        let url = if path.starts_with("http") {
+            path.to_string()
+        } else {
+            format!("{BASE_URL}/{path}")
+        };
+
+        let res = self
+            .http
+            .get(&url)
+            .header(AUTHORIZATION, format!("Bearer {token}"))
+            .send()
+            .await?;
+
+        let status = res.status();
+        if status.as_u16() == 429 {
+            let reset = res
+                .headers()
+                .get("x-rate-limit-reset")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<i64>().ok());
+            let wait_sec = reset
+                .map(|r| {
+                    let now = chrono::Utc::now().timestamp();
+                    (r - now).max(1)
+                })
+                .unwrap_or(60);
+            bail!("Rate limited. Resets in {wait_sec}s");
+        }
+
+        if !status.is_success() {
+            let text = res.text().await.unwrap_or_default();
+            bail!(
+                "X API {}: {}",
+                status.as_u16(),
+                &text[..text.len().min(200)]
+            );
+        }
+
+        Ok(res)
     }
 
     /// OAuth-authenticated GET request (user access token).
@@ -47,13 +118,13 @@ impl XClient {
         let url = if path.starts_with("http") {
             path.to_string()
         } else {
-            format!("{}/{}", BASE_URL, path)
+            format!("{BASE_URL}/{path}")
         };
 
         let res = self
             .http
             .get(&url)
-            .header(AUTHORIZATION, format!("Bearer {}", access_token))
+            .header(AUTHORIZATION, format!("Bearer {access_token}"))
             .send()
             .await?;
 
@@ -72,18 +143,16 @@ impl XClient {
         let url = if path.starts_with("http") {
             path.to_string()
         } else {
-            format!("{}/{}", BASE_URL, path)
+            format!("{BASE_URL}/{path}")
         };
 
         let mut req = self
             .http
             .post(&url)
-            .header(AUTHORIZATION, format!("Bearer {}", access_token));
+            .header(AUTHORIZATION, format!("Bearer {access_token}"));
 
         if let Some(b) = body {
-            req = req
-                .header(CONTENT_TYPE, "application/json")
-                .json(b);
+            req = req.header(CONTENT_TYPE, "application/json").json(b);
         }
 
         let res = req.send().await?;
@@ -97,25 +166,49 @@ impl XClient {
         let url = if path.starts_with("http") {
             path.to_string()
         } else {
-            format!("{}/{}", BASE_URL, path)
+            format!("{BASE_URL}/{path}")
         };
 
         let res = self
             .http
             .delete(&url)
-            .header(AUTHORIZATION, format!("Bearer {}", access_token))
+            .header(AUTHORIZATION, format!("Bearer {access_token}"))
             .send()
             .await?;
 
         handle_oauth_json(res).await
     }
 
-    /// POST with form-encoded body (for token exchange).
-    pub async fn post_form(
+    /// OAuth-authenticated PUT request.
+    pub async fn oauth_put(
         &self,
-        url: &str,
-        params: &[(&str, &str)],
+        path: &str,
+        access_token: &str,
+        body: Option<&serde_json::Value>,
     ) -> Result<serde_json::Value> {
+        tokio::time::sleep(Duration::from_millis(RATE_DELAY_MS)).await;
+
+        let url = if path.starts_with("http") {
+            path.to_string()
+        } else {
+            format!("{BASE_URL}/{path}")
+        };
+
+        let mut req = self
+            .http
+            .put(&url)
+            .header(AUTHORIZATION, format!("Bearer {access_token}"));
+
+        if let Some(b) = body {
+            req = req.header(CONTENT_TYPE, "application/json").json(b);
+        }
+
+        let res = req.send().await?;
+        handle_oauth_json(res).await
+    }
+
+    /// POST with form-encoded body (for token exchange).
+    pub async fn post_form(&self, url: &str, params: &[(&str, &str)]) -> Result<serde_json::Value> {
         let res = self
             .http
             .post(url)
@@ -161,12 +254,16 @@ async fn handle_response(res: reqwest::Response) -> Result<RawResponse> {
                 (r - now).max(1)
             })
             .unwrap_or(60);
-        bail!("Rate limited. Resets in {}s", wait_sec);
+        bail!("Rate limited. Resets in {wait_sec}s");
     }
 
     if !status.is_success() {
         let text = res.text().await.unwrap_or_default();
-        bail!("X API {}: {}", status.as_u16(), &text[..text.len().min(200)]);
+        bail!(
+            "X API {}: {}",
+            status.as_u16(),
+            &text[..text.len().min(200)]
+        );
     }
 
     Ok(res.json().await?)
@@ -183,10 +280,21 @@ async fn handle_oauth_response(res: reqwest::Response) -> Result<RawResponse> {
 }
 
 async fn handle_oauth_json(res: reqwest::Response) -> Result<serde_json::Value> {
+    handle_json_response(
+        res,
+        "OAuth token rejected (401). Try 'auth refresh' or re-run 'auth setup'.",
+    )
+    .await
+}
+
+async fn handle_json_response(
+    res: reqwest::Response,
+    unauthorized_message: &str,
+) -> Result<serde_json::Value> {
     let status = res.status();
 
     if status.as_u16() == 401 {
-        bail!("OAuth token rejected (401). Try 'auth refresh' or re-run 'auth setup'.");
+        bail!("{unauthorized_message}");
     }
 
     if status.as_u16() == 429 {
@@ -201,7 +309,7 @@ async fn handle_oauth_json(res: reqwest::Response) -> Result<serde_json::Value> 
                 (r - now).max(1)
             })
             .unwrap_or(60);
-        bail!("Rate limited. Resets in {}s", wait_sec);
+        bail!("Rate limited. Resets in {wait_sec}s");
     }
 
     if status.as_u16() == 204 {
@@ -210,7 +318,11 @@ async fn handle_oauth_json(res: reqwest::Response) -> Result<serde_json::Value> 
 
     if !status.is_success() {
         let text = res.text().await.unwrap_or_default();
-        bail!("X API {}: {}", status.as_u16(), &text[..text.len().min(200)]);
+        bail!(
+            "X API {}: {}",
+            status.as_u16(),
+            &text[..text.len().min(200)]
+        );
     }
 
     Ok(res.json().await?)

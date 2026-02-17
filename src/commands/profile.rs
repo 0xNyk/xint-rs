@@ -11,7 +11,7 @@ pub async fn run(args: &ProfileArgs, config: &Config, client: &XClient) -> Resul
     let token = config.require_bearer_token()?;
     let username = args.username.trim_start_matches('@');
 
-    eprintln!("Fetching profile for @{}...", username);
+    eprintln!("Fetching profile for @{username}...");
 
     let (user, tweets) =
         twitter::get_profile(client, token, username, args.count, args.replies).await?;
@@ -19,7 +19,7 @@ pub async fn run(args: &ProfileArgs, config: &Config, client: &XClient) -> Resul
     costs::track_cost(
         &config.costs_path(),
         "profile",
-        &format!("/2/users/by/username/{}", username),
+        &format!("/2/users/by/username/{username}"),
         tweets.len() as u64 + 1,
     );
 

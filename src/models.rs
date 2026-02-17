@@ -123,6 +123,7 @@ pub struct RawTweet {
 #[derive(Debug, Deserialize)]
 pub struct RawIncludes {
     pub users: Option<Vec<RawUser>>,
+    pub media: Option<Vec<serde_json::Value>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -307,7 +308,7 @@ pub struct Article {
     pub author: String,
     pub published: String,
     pub domain: String,
-    pub ttr: u64,        // time to read in minutes
+    pub ttr: u64, // time to read in minutes
     pub word_count: u64,
 }
 
@@ -384,15 +385,7 @@ pub struct WatchlistAccount {
     pub added_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Watchlist {
     pub accounts: Vec<WatchlistAccount>,
-}
-
-impl Default for Watchlist {
-    fn default() -> Self {
-        Self {
-            accounts: Vec::new(),
-        }
-    }
 }

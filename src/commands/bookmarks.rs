@@ -29,7 +29,7 @@ pub async fn run(args: &BookmarksArgs, config: &Config, client: &XClient) -> Res
         cached
     } else {
         let fetch_count = if args.since.is_some() || args.query.is_some() {
-            (args.limit * 3).max(100).min(800)
+            (args.limit * 3).clamp(100, 800)
         } else {
             args.limit.min(800)
         };
@@ -39,11 +39,11 @@ pub async fn run(args: &BookmarksArgs, config: &Config, client: &XClient) -> Res
         let mut all = Vec::new();
         let mut next_token: Option<String> = None;
         let per_page = fetch_count.min(100);
-        let max_pages = ((fetch_count + per_page - 1) / per_page).min(8);
+        let max_pages = fetch_count.div_ceil(per_page).min(8);
 
         for page in 0..max_pages {
             let pagination = match &next_token {
-                Some(t) => format!("&pagination_token={}", t),
+                Some(t) => format!("&pagination_token={t}"),
                 None => String::new(),
             };
             let path = format!(
@@ -102,7 +102,9 @@ pub async fn run(args: &BookmarksArgs, config: &Config, client: &XClient) -> Res
         filtered.retain(|t| {
             t.text.to_lowercase().contains(&q_lower)
                 || t.username.to_lowercase().contains(&q_lower)
-                || t.hashtags.iter().any(|h| h.to_lowercase().contains(&q_lower))
+                || t.hashtags
+                    .iter()
+                    .any(|h| h.to_lowercase().contains(&q_lower))
         });
     }
 
@@ -118,16 +120,19 @@ pub async fn run(args: &BookmarksArgs, config: &Config, client: &XClient) -> Res
         println!("{}", serde_json::to_string_pretty(&shown)?);
     } else if args.markdown {
         let md = format::format_research_markdown("Bookmarks", &shown, &["bookmarks"]);
-        println!("{}", md);
+        println!("{md}");
     } else {
-        println!("{}", format::format_results_terminal(&shown, Some("Bookmarks"), args.limit));
+        println!(
+            "{}",
+            format::format_results_terminal(&shown, Some("Bookmarks"), args.limit)
+        );
     }
 
     if args.save {
         let exports_dir = config.exports_dir();
         fs::create_dir_all(&exports_dir)?;
         let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
-        let path = exports_dir.join(format!("x-bookmarks-{}.md", date));
+        let path = exports_dir.join(format!("x-bookmarks-{date}.md"));
         let md = format::format_research_markdown("Bookmarks", &shown, &["bookmarks"]);
         fs::write(&path, &md)?;
         eprintln!("\nSaved to {}", path.display());

@@ -1,6 +1,6 @@
-use anyhow::Result;
 use crate::api::grok;
 use crate::models::*;
+use anyhow::Result;
 
 const SENTIMENT_SYSTEM: &str = r#"You are a sentiment analysis engine. Given tweets, return a JSON array with sentiment analysis for each tweet.
 
@@ -33,7 +33,11 @@ pub async fn analyze_sentiment(
         let tweet_context: String = chunk
             .iter()
             .map(|t| {
-                let text = if t.text.len() > 280 { &t.text[..280] } else { &t.text };
+                let text = if t.text.len() > 280 {
+                    &t.text[..280]
+                } else {
+                    &t.text
+                };
                 format!("[{}] @{}: {}", t.id, t.username, text)
             })
             .collect::<Vec<_>>()
@@ -46,7 +50,11 @@ pub async fn analyze_sentiment(
             },
             GrokMessage {
                 role: "user".to_string(),
-                content: format!("Analyze sentiment for these {} tweets:\n\n{}", chunk.len(), tweet_context),
+                content: format!(
+                    "Analyze sentiment for these {} tweets:\n\n{}",
+                    chunk.len(),
+                    tweet_context
+                ),
             },
         ];
 
@@ -62,7 +70,7 @@ pub async fn analyze_sentiment(
                 results.extend(parsed);
             }
             Err(e) => {
-                eprintln!("[sentiment] Batch analysis failed: {}", e);
+                eprintln!("[sentiment] Batch analysis failed: {e}");
                 for t in chunk {
                     results.push(SentimentResult {
                         id: t.id.clone(),
@@ -94,7 +102,7 @@ fn parse_json_response(content: &str, tweets: &[Tweet]) -> Vec<SentimentResult> 
 
     // Try parsing as JSON array
     if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&cleaned) {
-        return arr.iter().map(|item| parse_sentiment_item(item)).collect();
+        return arr.iter().map(parse_sentiment_item).collect();
     }
 
     // Fallback: try to extract JSON array from response
@@ -102,7 +110,7 @@ fn parse_json_response(content: &str, tweets: &[Tweet]) -> Vec<SentimentResult> 
         if let Some(end) = cleaned.rfind(']') {
             let slice = &cleaned[start..=end];
             if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(slice) {
-                return arr.iter().map(|item| parse_sentiment_item(item)).collect();
+                return arr.iter().map(parse_sentiment_item).collect();
             }
         }
     }
@@ -212,13 +220,32 @@ pub fn format_stats(stats: &SentimentStats, total: usize) -> String {
         format!("[{}{}]", "#".repeat(filled), ".".repeat(10 - filled))
     };
 
-    let mut out = format!("\nSentiment Analysis ({} tweets):\n", total);
-    out.push_str(&format!("  Avg score: {:.2} {}\n", stats.average_score, score_bar));
-    out.push_str(&format!("  + Positive: {} ({})\n", stats.positive, pct(stats.positive)));
-    out.push_str(&format!("  - Negative: {} ({})\n", stats.negative, pct(stats.negative)));
-    out.push_str(&format!("  = Neutral:  {} ({})\n", stats.neutral, pct(stats.neutral)));
+    let mut out = format!("\nSentiment Analysis ({total} tweets):\n");
+    out.push_str(&format!(
+        "  Avg score: {:.2} {}\n",
+        stats.average_score, score_bar
+    ));
+    out.push_str(&format!(
+        "  + Positive: {} ({})\n",
+        stats.positive,
+        pct(stats.positive)
+    ));
+    out.push_str(&format!(
+        "  - Negative: {} ({})\n",
+        stats.negative,
+        pct(stats.negative)
+    ));
+    out.push_str(&format!(
+        "  = Neutral:  {} ({})\n",
+        stats.neutral,
+        pct(stats.neutral)
+    ));
     if stats.mixed > 0 {
-        out.push_str(&format!("  ~ Mixed:    {} ({})\n", stats.mixed, pct(stats.mixed)));
+        out.push_str(&format!(
+            "  ~ Mixed:    {} ({})\n",
+            stats.mixed,
+            pct(stats.mixed)
+        ));
     }
 
     out

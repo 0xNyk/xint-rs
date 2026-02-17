@@ -45,13 +45,10 @@ pub async fn run(args: &AnalyzeArgs, config: &Config) -> Result<()> {
         let messages = vec![
             GrokMessage {
                 role: "system".to_string(),
-                content: args
-                    .system
-                    .clone()
-                    .unwrap_or_else(|| {
-                        "You are a social media analyst. Provide concise, actionable insights."
-                            .to_string()
-                    }),
+                content: args.system.clone().unwrap_or_else(|| {
+                    "You are a social media analyst. Provide concise, actionable insights."
+                        .to_string()
+                }),
             },
             GrokMessage {
                 role: "user".to_string(),

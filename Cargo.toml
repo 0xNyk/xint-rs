@@ -13,10 +13,10 @@ name = "xint"
 path = "src/main.rs"
 
 [dependencies]
-tokio = { version = "2026.2.18"] }
-reqwest = { version = "2026.2.18"], default-features = false }
-clap = { version = "2026.2.18"] }
-serde = { version = "2026.2.18"] }
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart", "stream"] }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 md-5 = "0.10"
@@ -26,7 +26,7 @@ getrandom = "0.3"
 csv = "1"
 dotenvy = "0.15"
 colored = "2"
-chrono = { version = "2026.2.18"] }
+chrono = { version = "0.4", features = ["serde"] }
 ctrlc = "3"
 anyhow = "1"
 thiserror = "2"

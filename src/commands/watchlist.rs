@@ -27,11 +27,7 @@ fn save_watchlist(config: &Config, wl: &Watchlist) -> Result<()> {
 }
 
 pub fn run(args: &WatchlistArgs, config: &Config) -> Result<()> {
-    let parts: Vec<String> = args
-        .subcommand
-        .as_ref()
-        .map(|v| v.clone())
-        .unwrap_or_default();
+    let parts: Vec<String> = args.subcommand.clone().unwrap_or_default();
 
     let sub = parts.first().map(|s| s.as_str()).unwrap_or("list");
 
@@ -47,7 +43,7 @@ pub fn run(args: &WatchlistArgs, config: &Config) -> Result<()> {
                 let note = acct
                     .note
                     .as_deref()
-                    .map(|n| format!(" -- {}", n))
+                    .map(|n| format!(" -- {n}"))
                     .unwrap_or_default();
                 let date = &acct.added_at[..10];
                 println!("  @{}{} (added {})", acct.username, note, date);
@@ -72,7 +68,7 @@ pub fn run(args: &WatchlistArgs, config: &Config) -> Result<()> {
                 .iter()
                 .any(|a| a.username.to_lowercase() == username.to_lowercase())
             {
-                println!("@{} is already on the watchlist.", username);
+                println!("@{username} is already on the watchlist.");
                 return Ok(());
             }
 
@@ -83,7 +79,11 @@ pub fn run(args: &WatchlistArgs, config: &Config) -> Result<()> {
             });
 
             save_watchlist(config, &wl)?;
-            println!("Added @{} to watchlist ({} total)", username, wl.accounts.len());
+            println!(
+                "Added @{} to watchlist ({} total)",
+                username,
+                wl.accounts.len()
+            );
         }
         "remove" | "rm" => {
             let username = parts
@@ -98,12 +98,12 @@ pub fn run(args: &WatchlistArgs, config: &Config) -> Result<()> {
             let after = wl.accounts.len();
 
             if before == after {
-                println!("@{} was not on the watchlist.", username);
+                println!("@{username} was not on the watchlist.");
                 return Ok(());
             }
 
             save_watchlist(config, &wl)?;
-            println!("Removed @{} from watchlist ({} remaining)", username, after);
+            println!("Removed @{username} from watchlist ({after} remaining)");
         }
         "check" => {
             let wl = load_watchlist(config);
@@ -118,21 +118,15 @@ pub fn run(args: &WatchlistArgs, config: &Config) -> Result<()> {
 
             match username {
                 Some(u) => {
-                    let found = wl
-                        .accounts
-                        .iter()
-                        .any(|a| a.username.to_lowercase() == u);
+                    let found = wl.accounts.iter().any(|a| a.username.to_lowercase() == u);
                     if found {
-                        println!("@{} is on the watchlist.", u);
+                        println!("@{u} is on the watchlist.");
                     } else {
-                        println!("@{} is NOT on the watchlist.", u);
+                        println!("@{u} is NOT on the watchlist.");
                     }
                 }
                 None => {
-                    println!(
-                        "Watchlist: {} accounts",
-                        wl.accounts.len()
-                    );
+                    println!("Watchlist: {} accounts", wl.accounts.len());
                     let usernames: Vec<_> = wl
                         .accounts
                         .iter()

@@ -4,7 +4,6 @@ use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-
 #[derive(serde::Serialize, serde::Deserialize)]
 struct CacheEntry<T> {
     query: String,
@@ -22,7 +21,7 @@ fn now_ms() -> u64 {
 
 fn cache_key(query: &str, params: &str) -> String {
     let mut hasher = Md5::new();
-    hasher.update(format!("{}|{}", query, params));
+    hasher.update(format!("{query}|{params}"));
     let hash = hasher.finalize();
     hex::encode(&hash[..6]) // 12 hex chars
 }
@@ -30,7 +29,7 @@ fn cache_key(query: &str, params: &str) -> String {
 // We need hex encoding — implement inline to avoid a dep
 mod hex {
     pub fn encode(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{:02x}", b)).collect()
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
     }
 }
 
@@ -49,7 +48,7 @@ pub fn get<T: DeserializeOwned>(
 ) -> Option<T> {
     ensure_dir(cache_dir);
     let key = cache_key(query, params);
-    let path = cache_dir.join(format!("{}.json", key));
+    let path = cache_dir.join(format!("{key}.json"));
 
     if !path.exists() {
         return None;
@@ -70,7 +69,7 @@ pub fn get<T: DeserializeOwned>(
 pub fn set<T: Serialize>(cache_dir: &Path, query: &str, params: &str, data: &T) {
     ensure_dir(cache_dir);
     let key = cache_key(query, params);
-    let path = cache_dir.join(format!("{}.json", key));
+    let path = cache_dir.join(format!("{key}.json"));
 
     let entry = CacheEntry {
         query: query.to_string(),
@@ -96,7 +95,9 @@ pub fn prune(cache_dir: &Path, ttl_ms: u64) -> usize {
             let path = entry.path();
             if path.extension().is_some_and(|e| e == "json") {
                 if let Ok(content) = fs::read_to_string(&path) {
-                    if let Ok(parsed) = serde_json::from_str::<CacheEntry<serde_json::Value>>(&content) {
+                    if let Ok(parsed) =
+                        serde_json::from_str::<CacheEntry<serde_json::Value>>(&content)
+                    {
                         if now - parsed.timestamp > ttl_ms {
                             let _ = fs::remove_file(&path);
                             removed += 1;
@@ -118,10 +119,8 @@ pub fn clear(cache_dir: &Path) -> usize {
     if let Ok(entries) = fs::read_dir(cache_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().is_some_and(|e| e == "json") {
-                if fs::remove_file(&path).is_ok() {
-                    removed += 1;
-                }
+            if path.extension().is_some_and(|e| e == "json") && fs::remove_file(&path).is_ok() {
+                removed += 1;
             }
         }
     }

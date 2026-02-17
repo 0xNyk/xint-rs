@@ -10,7 +10,7 @@ use crate::models::OAuthTokens;
 const AUTHORIZE_URL: &str = "https://x.com/i/oauth2/authorize";
 const TOKEN_URL: &str = "https://api.x.com/2/oauth2/token";
 const REDIRECT_URI: &str = "http://127.0.0.1:3333/callback";
-const SCOPES: &str = "bookmark.read bookmark.write tweet.read tweet.write users.read like.read like.write follows.read follows.write offline.access";
+const SCOPES: &str = "bookmark.read bookmark.write like.read like.write follows.read follows.write list.read list.write block.read block.write mute.read mute.write tweet.read tweet.write users.read offline.access";
 const EXPIRY_BUFFER_MS: i64 = 60_000;
 
 // ---------------------------------------------------------------------------
@@ -38,7 +38,7 @@ pub fn generate_code_challenge(verifier: &str) -> String {
 pub fn generate_state() -> String {
     let mut bytes = [0u8; 16];
     getrandom::fill(&mut bytes).expect("getrandom failed");
-    bytes.iter().map(|b| format!("{:02x}", b)).collect()
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -212,7 +212,7 @@ fn urlencoding_encode(s: &str) -> String {
             ' ' => result.push_str("%20"),
             _ => {
                 for byte in c.to_string().as_bytes() {
-                    result.push_str(&format!("%{:02X}", byte));
+                    result.push_str(&format!("%{byte:02X}"));
                 }
             }
         }
@@ -234,7 +234,7 @@ pub async fn auth_setup(
 
     eprintln!("\n=== X API OAuth 2.0 Setup (PKCE) ===\n");
     eprintln!("1. Open this URL in your browser:\n");
-    eprintln!("{}", authorize_url);
+    eprintln!("{authorize_url}");
     eprintln!("\n2. Authorize the app, then:");
 
     let code = if manual {
@@ -295,7 +295,7 @@ pub async fn auth_setup(
 
     save_tokens(tokens_path, &tokens)?;
 
-    eprintln!("\nAuthenticated as @{} (ID: {})", username, user_id);
+    eprintln!("\nAuthenticated as @{username} (ID: {user_id})");
     eprintln!("Token expires in {} minutes", expires_in / 60);
     eprintln!("Refresh token valid for ~6 months");
     eprintln!("Tokens saved to {}", tokens_path.display());
@@ -328,7 +328,7 @@ fn parse_callback_url(url_str: &str) -> Result<(String, String)> {
     }
 
     if !error.is_empty() {
-        bail!("Authorization failed: {}", error);
+        bail!("Authorization failed: {error}");
     }
     if code.is_empty() {
         bail!("No authorization code in redirect URL");
@@ -355,13 +355,11 @@ async fn wait_for_callback(expected_state: &str) -> Result<String> {
 
             // Extract path from GET request
             let first_line = request.lines().next().unwrap_or("");
-            let path = first_line
-                .split_whitespace()
-                .nth(1)
-                .unwrap_or("/");
+            let path = first_line.split_whitespace().nth(1).unwrap_or("/");
 
             if !path.starts_with("/callback") {
-                let response = "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\n\r\n<h2>Not Found</h2>";
+                let response =
+                    "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\n\r\n<h2>Not Found</h2>";
                 let _ = socket.write_all(response.as_bytes()).await;
                 continue;
             }
@@ -384,14 +382,14 @@ async fn wait_for_callback(expected_state: &str) -> Result<String> {
             }
 
             if !error.is_empty() {
-                let html = format!("<html><body><h2>Authorization Failed</h2><p>{}</p><p>You can close this tab.</p></body></html>", error);
+                let html = format!("<html><body><h2>Authorization Failed</h2><p>{error}</p><p>You can close this tab.</p></body></html>");
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n{}",
                     html.len(),
                     html
                 );
                 let _ = socket.write_all(response.as_bytes()).await;
-                return Err(anyhow::anyhow!("Authorization denied: {}", error));
+                return Err(anyhow::anyhow!("Authorization denied: {error}"));
             }
 
             if state != expected_state {
@@ -453,9 +451,12 @@ pub fn auth_status(tokens_path: &Path) {
         "EXPIRED".to_string()
     };
 
-    println!("Authenticated as @{} (ID: {})", tokens.username, tokens.user_id);
+    println!(
+        "Authenticated as @{} (ID: {})",
+        tokens.username, tokens.user_id
+    );
     println!("   Scopes: {}", tokens.scope);
-    println!("   Access token: {}", expires_str);
+    println!("   Access token: {expires_str}");
     println!("   Created: {}", tokens.created_at);
     println!("   Last refresh: {}", tokens.refreshed_at);
 }

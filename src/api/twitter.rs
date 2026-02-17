@@ -51,12 +51,30 @@ pub fn parse_tweets(raw: &RawResponse) -> Vec<Tweet> {
 
             let pm = t.get("public_metrics");
             let metrics = TweetMetrics {
-                likes: pm.and_then(|m| m.get("like_count")).and_then(|v| v.as_u64()).unwrap_or(0),
-                retweets: pm.and_then(|m| m.get("retweet_count")).and_then(|v| v.as_u64()).unwrap_or(0),
-                replies: pm.and_then(|m| m.get("reply_count")).and_then(|v| v.as_u64()).unwrap_or(0),
-                quotes: pm.and_then(|m| m.get("quote_count")).and_then(|v| v.as_u64()).unwrap_or(0),
-                impressions: pm.and_then(|m| m.get("impression_count")).and_then(|v| v.as_u64()).unwrap_or(0),
-                bookmarks: pm.and_then(|m| m.get("bookmark_count")).and_then(|v| v.as_u64()).unwrap_or(0),
+                likes: pm
+                    .and_then(|m| m.get("like_count"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0),
+                retweets: pm
+                    .and_then(|m| m.get("retweet_count"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0),
+                replies: pm
+                    .and_then(|m| m.get("reply_count"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0),
+                quotes: pm
+                    .and_then(|m| m.get("quote_count"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0),
+                impressions: pm
+                    .and_then(|m| m.get("impression_count"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0),
+                bookmarks: pm
+                    .and_then(|m| m.get("bookmark_count"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0),
             };
 
             let entities = t.get("entities");
@@ -70,11 +88,14 @@ pub fn parse_tweets(raw: &RawResponse) -> Vec<Tweet> {
                             let unwound = u.get("unwound_url").and_then(|v| v.as_str());
                             let url = unwound.unwrap_or(expanded).to_string();
                             let title = u.get("title").and_then(|v| v.as_str()).map(String::from);
-                            let description = u.get("description").and_then(|v| v.as_str()).map(String::from);
-                            let unwound_url = unwound
-                                .filter(|uw| *uw != expanded)
+                            let description = u
+                                .get("description")
+                                .and_then(|v| v.as_str())
                                 .map(String::from);
-                            let images = u.get("images")
+                            let unwound_url =
+                                unwound.filter(|uw| *uw != expanded).map(String::from);
+                            let images = u
+                                .get("images")
                                 .and_then(|v| v.as_array())
                                 .map(|imgs| {
                                     imgs.iter()
@@ -87,7 +108,13 @@ pub fn parse_tweets(raw: &RawResponse) -> Vec<Tweet> {
                                         .collect::<Vec<_>>()
                                 })
                                 .filter(|v| !v.is_empty());
-                            Some(UrlEntity { url, title, description, unwound_url, images })
+                            Some(UrlEntity {
+                                url,
+                                title,
+                                description,
+                                unwound_url,
+                                images,
+                            })
                         })
                         .collect()
                 })
@@ -98,7 +125,9 @@ pub fn parse_tweets(raw: &RawResponse) -> Vec<Tweet> {
                 .and_then(|v| v.as_array())
                 .map(|arr| {
                     arr.iter()
-                        .filter_map(|m| m.get("username").and_then(|v| v.as_str()).map(String::from))
+                        .filter_map(|m| {
+                            m.get("username").and_then(|v| v.as_str()).map(String::from)
+                        })
                         .collect()
                 })
                 .unwrap_or_default();
@@ -113,7 +142,7 @@ pub fn parse_tweets(raw: &RawResponse) -> Vec<Tweet> {
                 })
                 .unwrap_or_default();
 
-            let tweet_url = format!("https://x.com/{}/status/{}", username, id);
+            let tweet_url = format!("https://x.com/{username}/status/{id}");
 
             Some(Tweet {
                 id,
@@ -179,6 +208,7 @@ fn regex_lite(s: &str) -> Option<(i64, char)> {
 }
 
 /// Search tweets.
+#[allow(clippy::too_many_arguments)]
 pub async fn search(
     client: &XClient,
     token: &str,
@@ -200,12 +230,12 @@ pub async fn search(
     let mut time_filter = String::new();
     if let Some(s) = since {
         if let Some(ts) = parse_since(s) {
-            time_filter.push_str(&format!("&start_time={}", ts));
+            time_filter.push_str(&format!("&start_time={ts}"));
         }
     }
     if let Some(u) = until {
         if let Some(ts) = parse_since(u) {
-            time_filter.push_str(&format!("&end_time={}", ts));
+            time_filter.push_str(&format!("&end_time={ts}"));
         }
     }
 
@@ -214,12 +244,11 @@ pub async fn search(
 
     for page in 0..pages {
         let pagination = match &next_token {
-            Some(t) => format!("&next_token={}", t),
+            Some(t) => format!("&next_token={t}"),
             None => String::new(),
         };
         let path = format!(
-            "{}?query={}&max_results={}&{}&sort_order={}{}{}",
-            endpoint, encoded, max_per_page, FIELDS, sort_order, time_filter, pagination
+            "{endpoint}?query={encoded}&max_results={max_per_page}&{FIELDS}&sort_order={sort_order}{time_filter}{pagination}"
         );
 
         let raw = client.bearer_get(&path, token).await?;
@@ -240,7 +269,7 @@ pub async fn search(
 
 /// Get a single tweet by ID.
 pub async fn get_tweet(client: &XClient, token: &str, tweet_id: &str) -> Result<Option<Tweet>> {
-    let path = format!("tweets/{}?{}", tweet_id, FIELDS);
+    let path = format!("tweets/{tweet_id}?{FIELDS}");
     let raw = client.bearer_get(&path, token).await?;
     let tweets = parse_tweets(&raw);
     Ok(tweets.into_iter().next())
@@ -253,7 +282,7 @@ pub async fn get_thread(
     conversation_id: &str,
     pages: u32,
 ) -> Result<Vec<Tweet>> {
-    let query = format!("conversation_id:{}", conversation_id);
+    let query = format!("conversation_id:{conversation_id}");
     let mut tweets = search(client, token, &query, pages, "recency", None, None, false).await?;
 
     // Try to fetch root tweet
@@ -274,39 +303,27 @@ pub async fn get_profile(
     count: u32,
     include_replies: bool,
 ) -> Result<(serde_json::Value, Vec<Tweet>)> {
-    let path = format!(
-        "users/by/username/{}?user.fields=public_metrics,description,created_at",
-        username
-    );
+    let path =
+        format!("users/by/username/{username}?user.fields=public_metrics,description,created_at");
     let raw = client.bearer_get(&path, token).await?;
 
     let user = match &raw.data {
         Some(data) => data.clone(),
-        None => bail!("User @{} not found", username),
+        None => bail!("User @{username} not found"),
     };
 
     crate::client::rate_delay().await;
 
     let reply_filter = if include_replies { "" } else { " -is:reply" };
-    let query = format!("from:{} -is:retweet{}", username, reply_filter);
-    let tweets = search(
-        client,
-        token,
-        &query,
-        1,
-        "recency",
-        None,
-        None,
-        false,
-    )
-    .await?;
+    let query = format!("from:{username} -is:retweet{reply_filter}");
+    let tweets = search(client, token, &query, 1, "recency", None, None, false).await?;
 
     let tweets = tweets.into_iter().take(count as usize).collect();
     Ok((user, tweets))
 }
 
 /// Sort tweets by engagement metric.
-pub fn sort_by(tweets: &mut Vec<Tweet>, metric: &str) {
+pub fn sort_by(tweets: &mut [Tweet], metric: &str) {
     tweets.sort_by(|a, b| {
         let val = |t: &Tweet| -> u64 {
             match metric {
@@ -351,7 +368,7 @@ mod urlencoding {
                 ' ' => result.push_str("%20"),
                 _ => {
                     for byte in c.to_string().as_bytes() {
-                        result.push_str(&format!("%{:02X}", byte));
+                        result.push_str(&format!("%{byte:02X}"));
                     }
                 }
             }

@@ -102,7 +102,7 @@ fn resolve_woeid(input: &str) -> Result<u32> {
         }
     }
 
-    anyhow::bail!("Unknown location: \"{}\". Use --locations to list known locations.", input);
+    anyhow::bail!("Unknown location: \"{input}\". Use --locations to list known locations.");
 }
 
 pub async fn run(args: &TrendsArgs, config: &Config, client: &XClient) -> Result<()> {
@@ -123,7 +123,7 @@ pub async fn run(args: &TrendsArgs, config: &Config, client: &XClient) -> Result
         sorted.sort_by(|a, b| a.1.cmp(&b.1));
         for (woeid, name) in &sorted {
             let display = format!("{}{}", &name[..1].to_uppercase(), &name[1..]);
-            println!("  {:<20} WOEID {}", display, woeid);
+            println!("  {display:<20} WOEID {woeid}");
         }
         return Ok(());
     }
@@ -137,7 +137,7 @@ pub async fn run(args: &TrendsArgs, config: &Config, client: &XClient) -> Result
     let woeid = resolve_woeid(&location)?;
 
     // Check cache
-    let cache_key = format!("trends:{}", woeid);
+    let cache_key = format!("trends:{woeid}");
     let cache_ttl = 15 * 60 * 1000u64;
 
     if !args.no_cache {
@@ -165,8 +165,9 @@ pub async fn run(args: &TrendsArgs, config: &Config, client: &XClient) -> Result
             // Fallback to search-based estimation
             eprintln!("[trends] Falling back to search-based estimation");
             let lang = location_lang(woeid);
-            let query = format!("-is:retweet lang:{}", lang);
-            let tweets = twitter::search(client, token, &query, 1, "recency", None, None, false).await?;
+            let query = format!("-is:retweet lang:{lang}");
+            let tweets =
+                twitter::search(client, token, &query, 1, "recency", None, None, false).await?;
 
             costs::track_cost(
                 &config.costs_path(),
@@ -188,7 +189,10 @@ pub async fn run(args: &TrendsArgs, config: &Config, client: &XClient) -> Result
                         let tag = word.to_lowercase();
                         *hashtag_counts.entry(tag).or_default() += 1;
                     }
-                    if word.starts_with('$') && word.len() > 1 && word[1..].chars().all(|c| c.is_alphabetic()) {
+                    if word.starts_with('$')
+                        && word.len() > 1
+                        && word[1..].chars().all(|c| c.is_alphabetic())
+                    {
                         let tag = word.to_uppercase();
                         *hashtag_counts.entry(tag).or_default() += 1;
                     }
@@ -204,7 +208,7 @@ pub async fn run(args: &TrendsArgs, config: &Config, client: &XClient) -> Result
             let trends: Vec<Trend> = sorted
                 .into_iter()
                 .map(|(name, count)| Trend {
-                    url: format!("https://x.com/search?q={}", name),
+                    url: format!("https://x.com/search?q={name}"),
                     name,
                     tweet_count: Some(count),
                     category: None,
@@ -234,7 +238,7 @@ pub async fn run(args: &TrendsArgs, config: &Config, client: &XClient) -> Result
 }
 
 async fn fetch_trends_api(client: &XClient, token: &str, woeid: u32) -> Option<TrendsResult> {
-    let path = format!("trends/by/woeid/{}", woeid);
+    let path = format!("trends/by/woeid/{woeid}");
     let raw = client.bearer_get(&path, token).await.ok()?;
 
     // Check if response has data
@@ -246,9 +250,12 @@ async fn fetch_trends_api(client: &XClient, token: &str, woeid: u32) -> Option<T
         .filter_map(|t| {
             let name = t.get("trend_name")?.as_str()?.to_string();
             let tweet_count = t.get("tweet_count").and_then(|v| v.as_u64());
-            let category = t.get("category").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let category = t
+                .get("category")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
             Some(Trend {
-                url: format!("https://x.com/search?q={}", name),
+                url: format!("https://x.com/search?q={name}"),
                 name,
                 tweet_count,
                 category,
@@ -295,7 +302,7 @@ fn print_trends(result: &TrendsResult, limit: usize) {
         format!("Trending (estimated from search) -- {}", result.location)
     };
 
-    println!("\n{}\n", header);
+    println!("\n{header}\n");
 
     let display: Vec<_> = result.trends.iter().take(limit).collect();
 
@@ -304,19 +311,24 @@ fn print_trends(result: &TrendsResult, limit: usize) {
         return;
     }
 
-    let name_width = display.iter().map(|t| t.name.len()).max().unwrap_or(8).max(8);
+    let name_width = display
+        .iter()
+        .map(|t| t.name.len())
+        .max()
+        .unwrap_or(8)
+        .max(8);
 
     for (i, t) in display.iter().enumerate() {
         let rank = format!("{}.", i + 1);
         let name = format!("{:<width$}", t.name, width = name_width);
         let count_str = match t.tweet_count {
-            Some(n) if result.source == "search_fallback" => format!(" -- seen {} times", n),
+            Some(n) if result.source == "search_fallback" => format!(" -- seen {n} times"),
             Some(n) if n >= 1_000_000 => format!(" -- {:.1}M tweets", n as f64 / 1_000_000.0),
             Some(n) if n >= 1_000 => format!(" -- {:.1}K tweets", n as f64 / 1_000.0),
-            Some(n) => format!(" -- {} tweets", n),
+            Some(n) => format!(" -- {n} tweets"),
             None => String::new(),
         };
-        println!("{:>4} {}{}", rank, name, count_str);
+        println!("{rank:>4} {name}{count_str}");
     }
 
     println!();

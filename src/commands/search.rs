@@ -21,7 +21,7 @@ pub async fn run(args: &SearchArgs, config: &Config, client: &XClient) -> Result
     // --from shorthand
     if let Some(ref from) = args.from {
         let user = from.trim_start_matches('@');
-        query = format!("from:{} {}", user, query).trim().to_string();
+        query = format!("from:{user} {query}").trim().to_string();
     }
 
     // --no-replies / --no-retweets modifiers
@@ -36,7 +36,12 @@ pub async fn run(args: &SearchArgs, config: &Config, client: &XClient) -> Result
     let (pages, limit, min_likes, cache_ttl) = if args.quick {
         (1u32, args.limit.min(10), 5u64, 60 * 60 * 1000u64) // 1hr cache
     } else {
-        (args.pages.min(5), args.limit, args.min_likes, 15 * 60 * 1000u64)
+        (
+            args.pages.min(5),
+            args.limit,
+            args.min_likes,
+            15 * 60 * 1000u64,
+        )
     };
 
     // Quality mode
@@ -47,7 +52,7 @@ pub async fn run(args: &SearchArgs, config: &Config, client: &XClient) -> Result
     };
 
     // Check cache
-    let cache_key = format!("search:{}", query);
+    let cache_key = format!("search:{query}");
     let cache_params = format!("p={}&s={}", pages, args.sort);
     let cached: Option<Vec<crate::models::Tweet>> =
         crate::cache::get(&config.cache_dir(), &cache_key, &cache_params, cache_ttl);
@@ -76,7 +81,11 @@ pub async fn run(args: &SearchArgs, config: &Config, client: &XClient) -> Result
         // Track cost
         costs::track_cost(
             &config.costs_path(),
-            if args.full { "search_archive" } else { "search" },
+            if args.full {
+                "search_archive"
+            } else {
+                "search"
+            },
             "/2/tweets/search/recent",
             tweets.len() as u64,
         );
@@ -106,7 +115,7 @@ pub async fn run(args: &SearchArgs, config: &Config, client: &XClient) -> Result
                     let stats = sentiment::compute_stats(&sentiments);
                     eprint!("{}", sentiment::format_stats(&stats, tweets.len()));
                 }
-                Err(e) => eprintln!("[sentiment] Failed: {}", e),
+                Err(e) => eprintln!("[sentiment] Failed: {e}"),
             }
         } else {
             eprintln!("[sentiment] XAI_API_KEY not set, skipping sentiment analysis");
@@ -119,20 +128,17 @@ pub async fn run(args: &SearchArgs, config: &Config, client: &XClient) -> Result
         println!("{}", serde_json::to_string_pretty(&shown)?);
     } else if args.jsonl {
         let output = format::format_jsonl(&tweets[..tweets.len().min(limit)]);
-        println!("{}", output);
+        println!("{output}");
     } else if args.csv {
         let output = format::format_csv(&tweets[..tweets.len().min(limit)]);
-        println!("{}", output);
+        println!("{output}");
     } else if args.markdown {
-        let output = format::format_research_markdown(
-            &query,
-            &tweets[..tweets.len().min(limit)],
-            &[&query],
-        );
-        println!("{}", output);
+        let output =
+            format::format_research_markdown(&query, &tweets[..tweets.len().min(limit)], &[&query]);
+        println!("{output}");
     } else {
         let output = format::format_results_terminal(&tweets, Some(&query), limit);
-        println!("{}", output);
+        println!("{output}");
     }
 
     // Save to exports
@@ -147,7 +153,7 @@ pub async fn run(args: &SearchArgs, config: &Config, client: &XClient) -> Result
             .replace(' ', "-")
             .to_lowercase();
         let slug = &slug[..slug.len().min(40)];
-        let path = exports_dir.join(format!("search-{}-{}.md", slug, date));
+        let path = exports_dir.join(format!("search-{slug}-{date}.md"));
         let md = format::format_research_markdown(&query, &tweets, &[&query]);
         fs::write(&path, &md)?;
         eprintln!("\nSaved to {}", path.display());

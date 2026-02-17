@@ -44,27 +44,29 @@ impl Config {
     }
 
     pub fn require_bearer_token(&self) -> Result<&str> {
-        self.bearer_token
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("X_BEARER_TOKEN not found. Set it in your environment or in .env"))
+        self.bearer_token.as_deref().ok_or_else(|| {
+            anyhow::anyhow!("X_BEARER_TOKEN not found. Set it in your environment or in .env")
+        })
     }
 
     pub fn require_client_id(&self) -> Result<&str> {
-        self.client_id
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("X_CLIENT_ID not found. Set it in your environment or in .env"))
+        self.client_id.as_deref().ok_or_else(|| {
+            anyhow::anyhow!("X_CLIENT_ID not found. Set it in your environment or in .env")
+        })
     }
 
     pub fn require_xai_key(&self) -> Result<&str> {
-        self.xai_api_key
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("XAI_API_KEY not found. Set it in your environment or in .env"))
+        self.xai_api_key.as_deref().ok_or_else(|| {
+            anyhow::anyhow!("XAI_API_KEY not found. Set it in your environment or in .env")
+        })
     }
 
     pub fn require_xai_management_key(&self) -> Result<&str> {
-        self.xai_management_api_key
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("XAI_MANAGEMENT_API_KEY not found. Set it in your environment or in .env"))
+        self.xai_management_api_key.as_deref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "XAI_MANAGEMENT_API_KEY not found. Set it in your environment or in .env"
+            )
+        })
     }
 
     pub fn cache_dir(&self) -> PathBuf {

@@ -22,10 +22,10 @@ pub async fn run(args: &ReportArgs, config: &Config, client: &XClient) -> Result
     let time = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
     let date = &time[..10];
 
-    eprintln!("Generating report: \"{}\"...", query);
+    eprintln!("Generating report: \"{query}\"...");
 
     // 1. Main topic search
-    eprintln!("  Searching \"{}\"...", query);
+    eprintln!("  Searching \"{query}\"...");
     let tweets = twitter::search(
         client,
         token,
@@ -53,24 +53,28 @@ pub async fn run(args: &ReportArgs, config: &Config, client: &XClient) -> Result
     let accounts: Vec<String> = args
         .accounts
         .as_ref()
-        .map(|a| a.split(',').map(|s| s.trim().trim_start_matches('@').to_string()).collect())
+        .map(|a| {
+            a.split(',')
+                .map(|s| s.trim().trim_start_matches('@').to_string())
+                .collect()
+        })
         .unwrap_or_default();
 
     let mut account_sections = Vec::new();
     for acct in &accounts {
-        eprintln!("  Checking @{}...", acct);
+        eprintln!("  Checking @{acct}...");
         match twitter::get_profile(client, token, acct, 10, false).await {
             Ok((_user, user_tweets)) => {
                 costs::track_cost(
                     &config.costs_path(),
                     "profile",
-                    &format!("/2/users/by/username/{}", acct),
+                    &format!("/2/users/by/username/{acct}"),
                     user_tweets.len() as u64 + 1,
                 );
                 account_sections.push((acct.clone(), user_tweets));
             }
             Err(e) => {
-                eprintln!("  Warning: @{}: {}", acct, e);
+                eprintln!("  Warning: @{acct}: {e}");
             }
         }
     }
@@ -126,8 +130,9 @@ pub async fn run(args: &ReportArgs, config: &Config, client: &XClient) -> Result
                     sentiment_section.push('\n');
                 }
                 Err(e) => {
-                    sentiment_section
-                        .push_str(&format!("## Sentiment Analysis\n\n*Analysis failed: {}*\n\n", e));
+                    sentiment_section.push_str(&format!(
+                        "## Sentiment Analysis\n\n*Analysis failed: {e}*\n\n"
+                    ));
                 }
             }
         }
@@ -138,9 +143,8 @@ pub async fn run(args: &ReportArgs, config: &Config, client: &XClient) -> Result
     let ai_summary;
     if let Ok(api_key) = config.require_xai_key() {
         let http = reqwest::Client::new();
-        let tweet_context = grok::format_tweets_for_context(
-            &top_tweets[..top_tweets.len().min(15)],
-        );
+        let tweet_context =
+            grok::format_tweets_for_context(&top_tweets[..top_tweets.len().min(15)]);
 
         let prompt = format!(
             "Based on these {} tweets about \"{}\", provide:\n\
@@ -160,25 +164,29 @@ pub async fn run(args: &ReportArgs, config: &Config, client: &XClient) -> Result
 
         match grok::analyze_query(&http, api_key, &prompt, Some(&tweet_context), &opts).await {
             Ok(response) => ai_summary = response.content,
-            Err(e) => ai_summary = format!("*AI summary unavailable: {}*", e),
+            Err(e) => ai_summary = format!("*AI summary unavailable: {e}*"),
         }
     } else {
         ai_summary = "*AI summary unavailable: XAI_API_KEY not set*".to_string();
     }
 
     // Build report
-    let mut report = format!("# Intelligence Report: {}\n\n", query);
-    report.push_str(&format!("**Generated:** {}\n", time));
+    let mut report = format!("# Intelligence Report: {query}\n\n");
+    report.push_str(&format!("**Generated:** {time}\n"));
     report.push_str(&format!("**Tweets analyzed:** {}\n", tweets.len()));
     if !accounts.is_empty() {
         report.push_str(&format!(
             "**Tracked accounts:** {}\n",
-            accounts.iter().map(|a| format!("@{}", a)).collect::<Vec<_>>().join(", ")
+            accounts
+                .iter()
+                .map(|a| format!("@{a}"))
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
     }
     report.push_str("\n---\n\n");
 
-    report.push_str(&format!("## Executive Summary\n\n{}\n\n", ai_summary));
+    report.push_str(&format!("## Executive Summary\n\n{ai_summary}\n\n"));
 
     if !sentiment_section.is_empty() {
         report.push_str(&sentiment_section);
@@ -192,7 +200,7 @@ pub async fn run(args: &ReportArgs, config: &Config, client: &XClient) -> Result
 
     for (username, user_tweets) in &account_sections {
         if !user_tweets.is_empty() {
-            report.push_str(&format!("## @{} — Recent Activity\n\n", username));
+            report.push_str(&format!("## @{username} — Recent Activity\n\n"));
             for t in user_tweets.iter().take(5) {
                 report.push_str(&format::format_tweet_markdown(t));
                 report.push_str("\n\n");
@@ -201,8 +209,8 @@ pub async fn run(args: &ReportArgs, config: &Config, client: &XClient) -> Result
     }
 
     report.push_str("---\n\n## Report Metadata\n\n");
-    report.push_str(&format!("- **Query:** {}\n", query));
-    report.push_str(&format!("- **Date:** {}\n", date));
+    report.push_str(&format!("- **Query:** {query}\n"));
+    report.push_str(&format!("- **Date:** {date}\n"));
     report.push_str(&format!("- **Tweets scanned:** {}\n", tweets.len()));
     report.push_str(&format!(
         "- **Est. cost:** ~${:.2} (search) + Grok API\n",
@@ -210,7 +218,7 @@ pub async fn run(args: &ReportArgs, config: &Config, client: &XClient) -> Result
     ));
     report.push_str("- **Generated by:** [xint](https://github.com/0xNyk/xint)\n");
 
-    println!("{}", report);
+    println!("{report}");
 
     if args.save {
         let exports_dir = config.exports_dir();
@@ -222,7 +230,7 @@ pub async fn run(args: &ReportArgs, config: &Config, client: &XClient) -> Result
             .replace(' ', "-")
             .to_lowercase();
         let slug = &slug[..slug.len().min(40)];
-        let path = exports_dir.join(format!("report-{}-{}.md", slug, date));
+        let path = exports_dir.join(format!("report-{slug}-{date}.md"));
         fs::write(&path, &report)?;
         eprintln!("\nSaved to {}", path.display());
     }
