@@ -320,6 +320,7 @@ cargo build --release
 ./scripts/release.sh --dry-run --allow-dirty
 # forwards all flags to the canonical xint script:
 ./scripts/release.sh 2026.2.18.4 --ai-skill --no-auto-notes
+./scripts/release.sh 2026.2.18.4 --report-dir /tmp/xint-release-reports
 ```
 
 If `xint` is not checked out as a sibling directory, set:
@@ -332,6 +333,7 @@ Notes behavior is controlled by the canonical script:
 
 - Default: GitHub auto-generated notes (`--generate-notes`)
 - Manual override: set `CHANGELOG_ADDED`, `CHANGELOG_CHANGED`, `CHANGELOG_FIXED`, and/or `CHANGELOG_SECURITY`
+- Release report: `reports/releases/<version>.md` by default (disable with `--no-report`)
 
 ## Security
 
