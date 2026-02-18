@@ -334,6 +334,7 @@ Notes behavior is controlled by the canonical script:
 - Default: GitHub auto-generated notes (`--generate-notes`)
 - Manual override: set `CHANGELOG_ADDED`, `CHANGELOG_CHANGED`, `CHANGELOG_FIXED`, and/or `CHANGELOG_SECURITY`
 - Release report: `reports/releases/<version>.md` by default (disable with `--no-report`)
+- Report is uploaded to both GitHub releases as an asset by default (disable with `--no-report-asset`)
 
 ## Security
 
