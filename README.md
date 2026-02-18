@@ -319,7 +319,10 @@ cargo build --release
 # from xint-rs/
 ./scripts/release.sh --dry-run --allow-dirty
 # forwards all flags to the canonical xint script:
-./scripts/release.sh 2026.2.18.4 --ai-skill --no-auto-notes
+./scripts/release.sh 2026.2.18.4
+./scripts/release.sh 2026.2.18.4 --no-clawdhub
+./scripts/release.sh 2026.2.18.4 --skillsh
+./scripts/release.sh 2026.2.18.4 --no-auto-notes
 ./scripts/release.sh 2026.2.18.4 --report-dir /tmp/xint-release-reports
 ```
 
@@ -333,6 +336,8 @@ Notes behavior is controlled by the canonical script:
 
 - Default: GitHub auto-generated notes (`--generate-notes`)
 - Manual override: set `CHANGELOG_ADDED`, `CHANGELOG_CHANGED`, `CHANGELOG_FIXED`, and/or `CHANGELOG_SECURITY`
+- Default: publishes to ClawdHub when `clawdhub` CLI is installed (disable with `--no-clawdhub`)
+- Optional: publish to skills.sh with `--skillsh` (or `--ai-skill` for both)
 - Release report: `reports/releases/<version>.md` by default (disable with `--no-report`)
 - Report is uploaded to both GitHub releases as an asset by default (disable with `--no-report-asset`)
 - Report is embedded in both GitHub release bodies by default (disable with `--no-report-body`)
