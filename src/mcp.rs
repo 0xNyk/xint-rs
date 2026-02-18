@@ -4,7 +4,14 @@
 //! Exposes xint functionality as MCP tools for AI agents like Claude Code.
 
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, BufReader};
+
+use crate::cli::{McpArgs, PolicyMode};
+use crate::config::Config;
+use crate::costs;
+use crate::policy;
+use crate::reliability;
 
 // ============================================================================
 // Tool Definitions
@@ -57,11 +64,26 @@ pub struct MCPContent {
 
 pub struct MCPServer {
     initialized: bool,
+    policy_mode: PolicyMode,
+    enforce_budget: bool,
+    costs_path: PathBuf,
+    reliability_path: PathBuf,
 }
 
 impl MCPServer {
-    pub fn new() -> Self {
-        Self { initialized: false }
+    pub fn new(
+        policy_mode: PolicyMode,
+        enforce_budget: bool,
+        costs_path: PathBuf,
+        reliability_path: PathBuf,
+    ) -> Self {
+        Self {
+            initialized: false,
+            policy_mode,
+            enforce_budget,
+            costs_path,
+            reliability_path,
+        }
     }
 
     fn get_tools() -> Vec<MCPTool> {
@@ -266,6 +288,71 @@ impl MCPServer {
         ]
     }
 
+    fn tool_required_policy(name: &str) -> PolicyMode {
+        match name {
+            "xint_bookmarks" | "xint_diff" => PolicyMode::Engagement,
+            _ => PolicyMode::ReadOnly,
+        }
+    }
+
+    fn tool_budget_guarded(name: &str) -> bool {
+        matches!(
+            name,
+            "xint_search"
+                | "xint_profile"
+                | "xint_thread"
+                | "xint_tweet"
+                | "xint_trends"
+                | "xint_xsearch"
+                | "xint_collections_list"
+                | "xint_collections_search"
+                | "xint_analyze"
+                | "xint_article"
+                | "xint_bookmarks"
+                | "xint_watch"
+                | "xint_diff"
+                | "xint_report"
+                | "xint_sentiment"
+        )
+    }
+
+    fn ensure_tool_allowed(&self, name: &str) -> Result<(), String> {
+        let required = Self::tool_required_policy(name);
+        if policy::is_allowed(self.policy_mode, required) {
+            return Ok(());
+        }
+        Err(serde_json::json!({
+            "code": "POLICY_DENIED",
+            "message": format!("MCP tool '{}' requires '{}' policy mode", name, policy::as_str(required)),
+            "tool": name,
+            "policy_mode": policy::as_str(self.policy_mode),
+            "required_mode": policy::as_str(required),
+        })
+        .to_string())
+    }
+
+    fn ensure_budget_allowed(&self, name: &str) -> Result<(), String> {
+        if !self.enforce_budget || !Self::tool_budget_guarded(name) {
+            return Ok(());
+        }
+        let budget = costs::check_budget(&self.costs_path);
+        if budget.allowed {
+            return Ok(());
+        }
+        Err(serde_json::json!({
+            "code": "BUDGET_DENIED",
+            "message": format!(
+                "Daily budget exceeded (${:.2} / ${:.2})",
+                budget.spent, budget.limit
+            ),
+            "tool": name,
+            "spent_usd": budget.spent,
+            "limit_usd": budget.limit,
+            "remaining_usd": budget.remaining,
+        })
+        .to_string())
+    }
+
     pub async fn handle_message(&mut self, msg: &str) -> Result<Option<String>, String> {
         let parsed: serde_json::Value =
             serde_json::from_str(msg).map_err(|e| format!("Failed to parse JSON: {e}"))?;
@@ -312,6 +399,7 @@ impl MCPServer {
                 Ok(Some(response.to_string()))
             }
             "tools/call" => {
+                let started_at = std::time::Instant::now();
                 let params = parsed.get("params").ok_or("Missing params")?;
                 let name = params
                     .get("name")
@@ -322,15 +410,54 @@ impl MCPServer {
                     .cloned()
                     .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
 
-                let result = self.execute_tool(name, arguments).await?;
-                let response = serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {
-                        "content": result
+                let execution: Result<Vec<MCPContent>, String> =
+                    if let Err(err) = self.ensure_tool_allowed(name) {
+                        Err(err)
+                    } else if let Err(err) = self.ensure_budget_allowed(name) {
+                        Err(err)
+                    } else {
+                        self.execute_tool(name, arguments).await
+                    };
+
+                match execution {
+                    Ok(result) => {
+                        reliability::record_command_result(
+                            &self.reliability_path,
+                            &format!("mcp:{name}"),
+                            true,
+                            started_at.elapsed().as_millis(),
+                            reliability::ReliabilityMode::Mcp,
+                            false,
+                        );
+                        let response = serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "id": id,
+                            "result": {
+                                "content": result
+                            }
+                        });
+                        Ok(Some(response.to_string()))
                     }
-                });
-                Ok(Some(response.to_string()))
+                    Err(err) => {
+                        reliability::record_command_result(
+                            &self.reliability_path,
+                            &format!("mcp:{name}"),
+                            false,
+                            started_at.elapsed().as_millis(),
+                            reliability::ReliabilityMode::Mcp,
+                            false,
+                        );
+                        let response = serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "id": id,
+                            "error": {
+                                "code": -32603,
+                                "message": err
+                            }
+                        });
+                        Ok(Some(response.to_string()))
+                    }
+                }
             }
             _ => {
                 let response = serde_json::json!({
@@ -523,8 +650,16 @@ impl MCPServer {
         let mut reader = BufReader::new(stdin).lines();
 
         while let Ok(Some(line)) = reader.next_line().await {
-            if let Some(response) = self.handle_message(&line).await? {
-                println!("{response}");
+            match self.handle_message(&line).await {
+                Ok(Some(response)) => println!("{response}"),
+                Ok(None) => {}
+                Err(err) => {
+                    let response = serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "error": { "code": -32603, "message": err }
+                    });
+                    println!("{response}");
+                }
             }
         }
 
@@ -536,13 +671,28 @@ impl MCPServer {
 // CLI Command - using McpArgs from cli module
 // ============================================================================
 
-pub async fn run(args: crate::cli::McpArgs) -> anyhow::Result<()> {
+pub async fn run(args: McpArgs, config: &Config, global_policy: PolicyMode) -> anyhow::Result<()> {
+    let policy_mode = args.policy.unwrap_or(global_policy);
+    let enforce_budget = !args.no_budget_guard;
+
     println!(
-        "Starting xint MCP server (sse: {}, port: {})...",
-        args.sse, args.port
+        "Starting xint MCP server (sse: {}, port: {}, policy: {}, budget_guard: {})...",
+        args.sse,
+        args.port,
+        policy::as_str(policy_mode),
+        if enforce_budget {
+            "enabled"
+        } else {
+            "disabled"
+        }
     );
 
-    let mut server = MCPServer::new();
+    let mut server = MCPServer::new(
+        policy_mode,
+        enforce_budget,
+        config.costs_path(),
+        config.reliability_path(),
+    );
     server.run_stdio().await.map_err(|e| anyhow::anyhow!(e))?;
 
     Ok(())

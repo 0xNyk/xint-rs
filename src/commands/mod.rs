@@ -8,6 +8,7 @@ pub mod collections;
 pub mod costs_cmd;
 pub mod diff;
 pub mod engagement;
+pub mod health;
 pub mod lists;
 pub mod media;
 pub mod moderation;

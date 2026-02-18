@@ -113,6 +113,9 @@ pub enum Commands {
     #[command(alias = "cost")]
     Costs(CostsArgs),
 
+    /// Runtime health, auth checks, and reliability stats
+    Health(HealthArgs),
+
     /// Print machine-readable capability manifest
     #[command(alias = "caps")]
     Capabilities(CapabilitiesArgs),
@@ -680,6 +683,17 @@ pub struct CostsArgs {
 }
 
 #[derive(Parser)]
+pub struct HealthArgs {
+    /// Raw JSON output
+    #[arg(long)]
+    pub json: bool,
+
+    /// Reliability lookback window in days (1-30)
+    #[arg(long, default_value = "7")]
+    pub days: u32,
+}
+
+#[derive(Parser)]
 pub struct CapabilitiesArgs {
     /// Compact single-line JSON output
     #[arg(long)]
@@ -702,12 +716,16 @@ pub struct WatchlistArgs {
 
 #[derive(Parser)]
 pub struct AuthArgs {
-    /// Subcommand: setup, status, refresh
+    /// Subcommand: setup, status, refresh, doctor
     pub subcommand: Option<String>,
 
     /// Manual mode for auth setup
     #[arg(long)]
     pub manual: bool,
+
+    /// Raw JSON output (used by auth doctor)
+    #[arg(long)]
+    pub json: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -798,4 +816,12 @@ pub struct McpArgs {
     /// Port for SSE mode (default: 3000)
     #[arg(long, default_value = "3000")]
     pub port: u16,
+
+    /// Override policy mode for MCP tool calls
+    #[arg(long, value_enum)]
+    pub policy: Option<PolicyMode>,
+
+    /// Disable budget guard for MCP tool calls
+    #[arg(long)]
+    pub no_budget_guard: bool,
 }

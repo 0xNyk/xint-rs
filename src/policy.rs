@@ -44,6 +44,7 @@ pub fn command_name(cmd: &Commands) -> &'static str {
         Commands::Trends(_) => "trends",
         Commands::Analyze(_) => "analyze",
         Commands::Costs(_) => "costs",
+        Commands::Health(_) => "health",
         Commands::Capabilities(_) => "capabilities",
         Commands::Watchlist(_) => "watchlist",
         Commands::Auth(_) => "auth",
@@ -67,8 +68,7 @@ pub fn required_mode(cmd: &Commands) -> PolicyMode {
         | Commands::Follow(_)
         | Commands::Unfollow(_)
         | Commands::Lists(_)
-        | Commands::Diff(_)
-        | Commands::Auth(_) => PolicyMode::Engagement,
+        | Commands::Diff(_) => PolicyMode::Engagement,
         _ => PolicyMode::ReadOnly,
     }
 }

@@ -169,6 +169,23 @@ pub fn reset_today(costs_path: &Path) {
     save_data(costs_path, &data);
 }
 
+/// Return today's aggregate costs.
+pub fn today_costs(costs_path: &Path) -> DailyAggregate {
+    let data = load_data(costs_path);
+    let today = today_str();
+    data.daily
+        .iter()
+        .find(|d| d.date == today)
+        .cloned()
+        .unwrap_or_else(|| DailyAggregate {
+            date: today,
+            total_cost: 0.0,
+            calls: 0,
+            tweets_read: 0,
+            by_operation: HashMap::new(),
+        })
+}
+
 /// Get cost summary for a period.
 pub fn get_cost_summary(costs_path: &Path, period: &str) -> String {
     let data = load_data(costs_path);

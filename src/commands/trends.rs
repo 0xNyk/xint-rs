@@ -8,6 +8,7 @@ use crate::config::Config;
 use crate::costs;
 use crate::models::*;
 use crate::output_meta;
+use crate::reliability;
 
 fn woeid_map() -> HashMap<&'static str, u32> {
     let mut m = HashMap::new();
@@ -146,6 +147,9 @@ pub async fn run(args: &TrendsArgs, config: &Config, client: &XClient) -> Result
         let cached: Option<TrendsResult> =
             crate::cache::get(&config.cache_dir(), &cache_key, "", cache_ttl);
         if let Some(result) = cached {
+            if result.source == "search_fallback" {
+                reliability::mark_command_fallback("trends");
+            }
             if args.json {
                 let is_fallback = result.source == "search_fallback";
                 let meta = output_meta::build_meta(
@@ -246,6 +250,9 @@ pub async fn run(args: &TrendsArgs, config: &Config, client: &XClient) -> Result
     };
 
     // Cache result
+    if result.source == "search_fallback" {
+        reliability::mark_command_fallback("trends");
+    }
     crate::cache::set(&config.cache_dir(), &cache_key, "", &result);
 
     if args.json {

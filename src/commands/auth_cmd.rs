@@ -24,12 +24,16 @@ pub async fn run(args: &AuthArgs, config: &Config, client: &XClient) -> Result<(
             let expires_in = tokens.expires_at - chrono::Utc::now().timestamp_millis();
             println!("Expires in {} minutes", expires_in / 60_000);
         }
+        "doctor" => {
+            crate::commands::health::run_auth_doctor(config, client, args.json).await?;
+        }
         _ => {
-            println!("Usage: xint auth [setup|status|refresh]");
+            println!("Usage: xint auth [setup|status|refresh|doctor]");
             println!();
             println!("  setup [--manual]    Interactive OAuth setup");
             println!("  status             Show current auth status (default)");
             println!("  refresh            Force token refresh");
+            println!("  doctor [--json]    Validate auth credentials and scopes");
         }
     }
 

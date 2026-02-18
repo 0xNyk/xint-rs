@@ -89,6 +89,10 @@ impl Config {
         self.data_dir.join("api-costs.json")
     }
 
+    pub fn reliability_path(&self) -> PathBuf {
+        self.data_dir.join("reliability-metrics.json")
+    }
+
     pub fn watchlist_path(&self) -> PathBuf {
         self.data_dir.join("watchlist.json")
     }
