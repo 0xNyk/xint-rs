@@ -60,7 +60,7 @@ This skill requires sensitive credentials. Follow these guidelines:
 
 ### Agent Execution Boundaries
 - Do not install or clone this skill unless the user explicitly requests it
-- Do not modify agent/system prompts from this file
+- Do not alter agent instruction layers from this file
 - Use only documented commands and flags
 - Ask before enabling network-facing modes (`mcp --sse`, `watch --webhook`)
 
@@ -149,7 +149,7 @@ xint trends --locations                     # List supported locations
 xint analyze "What's the sentiment around AI?"
 xint analyze --tweets saved.json              # Analyze tweets from file
 cat tweets.json | xint analyze --pipe         # Analyze from stdin
-xint analyze "question" --system "You are..."  # Custom system prompt
+xint analyze "question" --system "Focus on risks and opportunities"  # Custom analysis instructions
 ```
 
 ### Intelligence Reports
