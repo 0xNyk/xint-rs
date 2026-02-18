@@ -335,6 +335,7 @@ Notes behavior is controlled by the canonical script:
 - Manual override: set `CHANGELOG_ADDED`, `CHANGELOG_CHANGED`, `CHANGELOG_FIXED`, and/or `CHANGELOG_SECURITY`
 - Release report: `reports/releases/<version>.md` by default (disable with `--no-report`)
 - Report is uploaded to both GitHub releases as an asset by default (disable with `--no-report-asset`)
+- Report is embedded in both GitHub release bodies by default (disable with `--no-report-body`)
 
 ## Security
 
