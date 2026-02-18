@@ -318,6 +318,8 @@ cargo build --release
 ```bash
 # from xint-rs/
 ./scripts/release.sh --dry-run --allow-dirty
+# forwards all flags to the canonical xint script:
+./scripts/release.sh 2026.2.18.4 --ai-skill --no-auto-notes
 ```
 
 If `xint` is not checked out as a sibling directory, set:
@@ -325,6 +327,11 @@ If `xint` is not checked out as a sibling directory, set:
 ```bash
 XINT_RELEASE_SCRIPT=/absolute/path/to/xint/scripts/release.sh
 ```
+
+Notes behavior is controlled by the canonical script:
+
+- Default: GitHub auto-generated notes (`--generate-notes`)
+- Manual override: set `CHANGELOG_ADDED`, `CHANGELOG_CHANGED`, `CHANGELOG_FIXED`, and/or `CHANGELOG_SECURITY`
 
 ## Security
 

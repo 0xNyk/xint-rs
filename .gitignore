@@ -3,3 +3,12 @@
 *.env
 !.env.example
 .DS_Store
+
+# Local AI tool folders
+.agent/
+.agents/
+.claude/
+.cline/
+.continue/
+.cursor/
+.windsurf/
