@@ -242,7 +242,7 @@ pub struct WatchArgs {
     #[arg(long, short = 'i', default_value = "5m")]
     pub interval: String,
 
-    /// POST new tweets to this URL
+    /// POST new tweets to this URL (https:// required for remote hosts)
     #[arg(long)]
     pub webhook: Option<String>,
 
@@ -281,7 +281,7 @@ pub struct StreamArgs {
     #[arg(long)]
     pub backfill: Option<u8>,
 
-    /// POST stream events to this URL
+    /// POST stream events to this URL (https:// required for remote hosts)
     #[arg(long)]
     pub webhook: Option<String>,
 

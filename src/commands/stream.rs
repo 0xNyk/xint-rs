@@ -10,6 +10,7 @@ use crate::costs;
 use crate::format;
 use crate::models::RawResponse;
 use crate::output_meta;
+use crate::webhook::validate_webhook_url;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 struct StreamRule {
@@ -48,6 +49,10 @@ pub async fn run_stream(args: &StreamArgs, config: &Config, client: &XClient) ->
 
     let token = config.require_bearer_token()?;
     let backfill = validate_backfill(args.backfill)?;
+    let webhook_url = match args.webhook.as_deref() {
+        Some(raw) => Some(validate_webhook_url(raw)?),
+        None => None,
+    };
 
     let mut path = format!("tweets/search/stream?{FIELDS}");
     if let Some(minutes) = backfill {
@@ -159,7 +164,7 @@ pub async fn run_stream(args: &StreamArgs, config: &Config, client: &XClient) ->
                     println!();
                 }
 
-                if let Some(webhook) = &args.webhook {
+                if let Some(webhook) = &webhook_url {
                     if let Err(err) = client
                         .post_json(
                             webhook,

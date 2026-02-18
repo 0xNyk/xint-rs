@@ -10,6 +10,7 @@ use crate::config::Config;
 use crate::costs;
 use crate::format;
 use crate::output_meta;
+use crate::webhook::validate_webhook_url;
 
 fn parse_duration(s: &str) -> Option<u64> {
     let s = s.trim();
@@ -60,6 +61,11 @@ pub async fn run(args: &WatchArgs, config: &Config, client: &XClient) -> Result<
         bail!("Minimum interval is 10s");
     }
 
+    let webhook_url = match args.webhook.as_deref() {
+        Some(raw) => Some(validate_webhook_url(raw)?),
+        None => None,
+    };
+
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
 
@@ -76,7 +82,7 @@ pub async fn run(args: &WatchArgs, config: &Config, client: &XClient) -> Result<
     };
 
     eprintln!("\nWatching: \"{query}\" every {interval_str}");
-    if let Some(ref wh) = args.webhook {
+    if let Some(ref wh) = webhook_url {
         eprintln!("Webhook: {wh}");
     }
     eprintln!("Press Ctrl+C to stop\n");
@@ -162,7 +168,7 @@ pub async fn run(args: &WatchArgs, config: &Config, client: &XClient) -> Result<
                     }
 
                     // Webhook
-                    if let Some(ref webhook_url) = args.webhook {
+                    if let Some(ref webhook_url) = webhook_url {
                         let payload = serde_json::json!({
                             "source": "xint",
                             "query": query,

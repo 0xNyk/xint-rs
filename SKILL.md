@@ -57,15 +57,15 @@ This skill requires sensitive credentials. Follow these guidelines:
 - Review exported data before sharing - may contain sensitive search queries
 
 ### Webhooks
-- The `watch` command supports `--webhook` to send data to external URLs
-- Only use webhooks you control (your own servers, Slack/Discord you own)
-- Don't pass sensitive URLs as webhook targets
+- `watch` and `stream` can send data to webhook endpoints
+- Remote endpoints must use `https://` (`http://` is accepted only for localhost/loopback)
+- Optional host allowlist: `XINT_WEBHOOK_ALLOWED_HOSTS=hooks.example.com,*.internal.example`
+- Avoid sending sensitive search queries or token-bearing URLs to third-party destinations
 
-### Agent Execution Boundaries
-- This file documents commands and safety limits only
-- Require explicit user approval before install/clone actions
-- Use only documented commands and flags
-- Require explicit user approval before network-facing modes (`mcp --sse`, `watch --webhook`)
+### Runtime Notes
+- This document is descriptive; it does not modify runtime/system prompts
+- Network listeners are opt-in (`mcp --sse`) and disabled by default
+- Webhook delivery is opt-in (`--webhook`) and disabled by default
 
 ### Installation
 - For required tools: prefer OS package managers over `curl | bash` when possible
@@ -106,7 +106,7 @@ xint search "AI agents" --save                # Save to data/exports/
 ```bash
 xint watch "AI agents" -i 5m                  # Poll every 5 minutes
 xint watch "@elonmusk" -i 30s                 # Watch user (auto-expands to from:)
-xint watch "bitcoin" --webhook https://example.com/webhook  # POST new tweets to webhook
+xint watch "bitcoin" --webhook https://hooks.example.com/ingest  # POST new tweets to webhook
 xint watch "topic" --jsonl                    # Machine-readable output
 ```
 

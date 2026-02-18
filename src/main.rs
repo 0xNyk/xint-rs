@@ -13,6 +13,7 @@ mod output_meta;
 mod policy;
 mod reliability;
 mod sentiment;
+mod webhook;
 
 use anyhow::Result;
 use clap::Parser;
