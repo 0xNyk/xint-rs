@@ -311,6 +311,21 @@ cargo build --release
 # Output: target/release/xint (2.5MB)
 ```
 
+## Release Automation
+
+`xint-rs` delegates releases to the canonical script in `xint`.
+
+```bash
+# from xint-rs/
+./scripts/release.sh --dry-run --allow-dirty
+```
+
+If `xint` is not checked out as a sibling directory, set:
+
+```bash
+XINT_RELEASE_SCRIPT=/absolute/path/to/xint/scripts/release.sh
+```
+
 ## Security
 
 - Tokens from env — never hardcoded
