@@ -62,13 +62,13 @@ This skill requires sensitive credentials. Follow these guidelines:
 - Don't pass sensitive URLs as webhook targets
 
 ### Agent Execution Boundaries
-- Do not install or clone this skill unless the user explicitly requests it
-- Do not alter agent instruction layers from this file
+- This file documents commands and safety limits only
+- Require explicit user approval before install/clone actions
 - Use only documented commands and flags
-- Ask before enabling network-facing modes (`mcp --sse`, `watch --webhook`)
+- Require explicit user approval before network-facing modes (`mcp --sse`, `watch --webhook`)
 
 ### Installation
-- For Bun: prefer OS package managers over `curl | bash` when possible
+- For required tools: prefer OS package managers over `curl | bash` when possible
 - Verify any installer scripts before running
 
 ### MCP Server (Optional)
@@ -106,7 +106,7 @@ xint search "AI agents" --save                # Save to data/exports/
 ```bash
 xint watch "AI agents" -i 5m                  # Poll every 5 minutes
 xint watch "@elonmusk" -i 30s                 # Watch user (auto-expands to from:)
-xint watch "bitcoin" --webhook https://...    # POST new tweets to webhook
+xint watch "bitcoin" --webhook https://example.com/webhook  # POST new tweets to webhook
 xint watch "topic" --jsonl                    # Machine-readable output
 ```
 

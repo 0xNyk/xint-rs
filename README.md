@@ -146,7 +146,7 @@ xint search "AI" --jsonl | jq '.text'
 ```bash
 xint watch "solana" -i 5m
 xint watch "@user" -i 1m
-xint watch "news" -i 30s --webhook https://hooks.slack.com/...
+xint watch "news" -i 30s --webhook https://example.com/webhook
 ```
 
 Press `Ctrl+C` — shows session stats.
