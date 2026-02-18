@@ -23,7 +23,10 @@ credentials:
     required: false
 required_env_vars:
   - X_BEARER_TOKEN
+requiredEnvVars:
+  - X_BEARER_TOKEN
 primary_credential: X_BEARER_TOKEN
+primaryCredential: X_BEARER_TOKEN
 security:
   always: false
   autonomous: false
@@ -149,7 +152,7 @@ xint trends --locations                     # List supported locations
 xint analyze "What's the sentiment around AI?"
 xint analyze --tweets saved.json              # Analyze tweets from file
 cat tweets.json | xint analyze --pipe         # Analyze from stdin
-xint analyze "question" --system "Focus on risks and opportunities"  # Custom analysis instructions
+xint analyze "question"                              # Free-form analysis request
 ```
 
 ### Intelligence Reports
