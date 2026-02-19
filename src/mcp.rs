@@ -555,6 +555,74 @@ impl MCPServer {
             .map_err(|e| format!("Package API JSON decode failed: {e}"))
     }
 
+    fn ensure_package_query_citations(
+        &self,
+        result: &serde_json::Value,
+        require_citations: bool,
+    ) -> Result<(), String> {
+        if !require_citations {
+            return Ok(());
+        }
+        let obj = result
+            .as_object()
+            .ok_or_else(|| "Package API query response must be a JSON object.".to_string())?;
+
+        let claims = obj
+            .get("claims")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let citations = obj
+            .get("citations")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+
+        if !claims.is_empty() && citations.is_empty() {
+            return Err(
+                "Package API query response missing citations while require_citations=true."
+                    .to_string(),
+            );
+        }
+
+        let claim_ids: std::collections::HashSet<String> = claims
+            .iter()
+            .filter_map(|claim| {
+                claim
+                    .as_object()
+                    .and_then(|item| item.get("claim_id"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToOwned::to_owned)
+            })
+            .collect();
+
+        if claim_ids.is_empty() {
+            return Ok(());
+        }
+
+        let cited_claim_ids: std::collections::HashSet<String> = citations
+            .iter()
+            .filter_map(|citation| {
+                let obj = citation.as_object()?;
+                let claim_id = obj.get("claim_id")?.as_str()?;
+                let url = obj.get("url")?.as_str()?;
+                if claim_id.is_empty() || url.is_empty() {
+                    return None;
+                }
+                Some(claim_id.to_string())
+            })
+            .collect();
+
+        for claim_id in claim_ids {
+            if !cited_claim_ids.contains(&claim_id) {
+                return Err(format!(
+                    "Package API query response has uncited claim '{claim_id}' while require_citations=true."
+                ));
+            }
+        }
+        Ok(())
+    }
+
     pub async fn handle_message(&mut self, msg: &str) -> Result<Option<String>, String> {
         let parsed: serde_json::Value =
             serde_json::from_str(msg).map_err(|e| format!("Failed to parse JSON: {e}"))?;
@@ -867,18 +935,20 @@ impl MCPServer {
                 if package_ids.is_empty() {
                     return Err("Missing package_ids".to_string());
                 }
+                let require_citations = args
+                    .get("require_citations")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true);
                 let payload = serde_json::json!({
                     "query": query,
                     "package_ids": package_ids,
                     "max_claims": args.get("max_claims").and_then(|v| v.as_u64()).unwrap_or(10),
-                    "require_citations": args
-                        .get("require_citations")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(true)
+                    "require_citations": require_citations
                 });
                 let result = self
                     .call_package_api(reqwest::Method::POST, "/query", Some(payload))
                     .await?;
+                self.ensure_package_query_citations(&result, require_citations)?;
                 Ok(vec![MCPContent {
                     content_type: "text".to_string(),
                     text: serde_json::to_string_pretty(&result)
@@ -1242,5 +1312,42 @@ mod tests {
 
         restore_env("XINT_PACKAGE_API_BASE_URL", prev_base);
         restore_env("XINT_BILLING_UPGRADE_URL", prev_upgrade);
+    }
+
+    #[tokio::test]
+    async fn package_query_requires_citations_when_requested() {
+        let _guard = env_lock().lock().expect("env lock");
+        let prev_base = save_env("XINT_PACKAGE_API_BASE_URL");
+
+        let (base_url, _req_rx, server_task) = spawn_mock_server(
+            200,
+            r#"{"answer":"No citations","claims":[{"claim_id":"claim_1","text":"example"}],"citations":[]}"#,
+        )
+        .await;
+        env::set_var("XINT_PACKAGE_API_BASE_URL", base_url);
+
+        let server = MCPServer::new(
+            PolicyMode::ReadOnly,
+            false,
+            PathBuf::from("/tmp/xint-rs-test-costs.json"),
+            PathBuf::from("/tmp/xint-rs-test-reliability.json"),
+        );
+
+        let err = server
+            .execute_tool(
+                "xint_package_query",
+                serde_json::json!({
+                    "query": "what changed?",
+                    "package_ids": ["pkg_123"],
+                    "require_citations": true
+                }),
+            )
+            .await
+            .expect_err("expected citation validation failure");
+        server_task.await.expect("server task");
+
+        assert!(err.contains("missing citations"));
+
+        restore_env("XINT_PACKAGE_API_BASE_URL", prev_base);
     }
 }
