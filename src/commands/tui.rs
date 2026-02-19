@@ -54,6 +54,8 @@ impl DashboardTab {
 struct UiState {
     active_index: usize,
     tab: DashboardTab,
+    output_offset: usize,
+    output_search: String,
 }
 
 struct MenuOption {
@@ -61,6 +63,12 @@ struct MenuOption {
     label: &'static str,
     aliases: &'static [&'static str],
     hint: &'static str,
+}
+
+struct CommandMeta {
+    summary: &'static str,
+    example: &'static str,
+    cost_hint: &'static str,
 }
 
 struct Theme {
@@ -115,12 +123,72 @@ const MENU_OPTIONS: &[MenuOption] = &[
     },
 ];
 
+const COMMAND_META: &[(&str, CommandMeta)] = &[
+    (
+        "1",
+        CommandMeta {
+            summary: "Discover relevant posts with ranked result quality.",
+            example: "xint search \"open-source ai agents\"",
+            cost_hint: "Low-medium (depends on query depth)",
+        },
+    ),
+    (
+        "2",
+        CommandMeta {
+            summary: "Surface current trend clusters globally or by location.",
+            example: "xint trends \"San Francisco\"",
+            cost_hint: "Low",
+        },
+    ),
+    (
+        "3",
+        CommandMeta {
+            summary: "Inspect profile metadata and recent activity context.",
+            example: "xint profile 0xNyk",
+            cost_hint: "Low",
+        },
+    ),
+    (
+        "4",
+        CommandMeta {
+            summary: "Expand a tweet into threaded conversation context.",
+            example: "xint thread https://x.com/.../status/...",
+            cost_hint: "Medium",
+        },
+    ),
+    (
+        "5",
+        CommandMeta {
+            summary: "Fetch article content from URL or tweet-linked article.",
+            example: "xint article https://x.com/.../status/...",
+            cost_hint: "Medium-high (fetch + parse)",
+        },
+    ),
+    (
+        "6",
+        CommandMeta {
+            summary: "Display full command reference and flags.",
+            example: "xint --help",
+            cost_hint: "None",
+        },
+    ),
+    (
+        "0",
+        CommandMeta {
+            summary: "Exit interactive dashboard.",
+            example: "q",
+            cost_hint: "None",
+        },
+    ),
+];
+
 const HELP_LINES: &[&str] = &[
     "Hotkeys",
     "  Up/Down: Move selection",
     "  Enter: Run selected command",
     "  Tab: Switch tabs",
-    "  F1/F2/F3: Commands/Output/Help",
+    "  F: Output search (filter)",
+    "  PgUp/PgDn: Scroll output",
     "  /: Command palette",
     "  ?: Open Help tab",
     "  q or Esc: Exit",
@@ -188,6 +256,27 @@ fn normalize_choice(raw: &str) -> Option<&'static str> {
         }
     }
     None
+}
+
+fn command_meta(key: &str) -> CommandMeta {
+    COMMAND_META
+        .iter()
+        .find_map(|(k, meta)| {
+            if *k == key {
+                Some(CommandMeta {
+                    summary: meta.summary,
+                    example: meta.example,
+                    cost_hint: meta.cost_hint,
+                })
+            } else {
+                None
+            }
+        })
+        .unwrap_or(CommandMeta {
+            summary: "No metadata available.",
+            example: "-",
+            cost_hint: "Unknown",
+        })
 }
 
 fn score_option(option: &MenuOption, query: &str) -> usize {
@@ -280,7 +369,7 @@ fn pad_text(value: &str, width: usize) -> String {
     }
 }
 
-fn build_left_lines(active_index: usize) -> Vec<String> {
+fn build_menu_lines(active_index: usize) -> Vec<String> {
     let mut lines = vec!["Menu".to_string(), String::new()];
 
     for (index, option) in MENU_OPTIONS.iter().enumerate() {
@@ -300,62 +389,114 @@ fn build_left_lines(active_index: usize) -> Vec<String> {
     lines
 }
 
-fn build_right_lines(session: &SessionState, tab: DashboardTab) -> Vec<String> {
-    match tab {
+fn build_command_drawer(active_index: usize) -> Vec<String> {
+    let selected = MENU_OPTIONS.get(active_index).unwrap_or(&MENU_OPTIONS[0]);
+    let meta = command_meta(selected.key);
+    vec![
+        "Command details".to_string(),
+        String::new(),
+        format!("Selected: {}", selected.label),
+        format!("Summary: {}", meta.summary),
+        format!("Example: {}", meta.example),
+        format!("Cost: {}", meta.cost_hint),
+    ]
+}
+
+fn output_view_lines(
+    session: &SessionState,
+    ui_state: &mut UiState,
+    viewport: usize,
+) -> Vec<String> {
+    let query = ui_state.output_search.trim().to_ascii_lowercase();
+
+    let filtered: Vec<&String> = if query.is_empty() {
+        session.last_output_lines.iter().collect()
+    } else {
+        session
+            .last_output_lines
+            .iter()
+            .filter(|line| line.to_ascii_lowercase().contains(&query))
+            .collect()
+    };
+
+    let visible = max(1usize, viewport);
+    let max_offset = filtered.len().saturating_sub(visible);
+    if ui_state.output_offset > max_offset {
+        ui_state.output_offset = max_offset;
+    }
+
+    let start = filtered
+        .len()
+        .saturating_sub(visible.saturating_add(ui_state.output_offset));
+    let end = (start + visible).min(filtered.len());
+
+    let mut lines = vec![
+        "Last run".to_string(),
+        String::new(),
+        format!(
+            "command: {}",
+            session.last_command.as_deref().unwrap_or("-")
+        ),
+        format!("status: {}", session.last_status.as_deref().unwrap_or("-")),
+        format!(
+            "filter: {}",
+            if ui_state.output_search.trim().is_empty() {
+                "(none)"
+            } else {
+                ui_state.output_search.trim()
+            }
+        ),
+        String::new(),
+        "output:".to_string(),
+    ];
+
+    if start >= end {
+        lines.push("(no output lines for current filter)".to_string());
+    } else {
+        for line in filtered[start..end].iter().map(|line| line.as_str()) {
+            lines.push(line.to_string());
+        }
+    }
+
+    let total = filtered.len();
+    let from = if total == 0 { 0 } else { start + 1 };
+    let to = if total == 0 { 0 } else { end };
+    lines.push(String::new());
+    lines.push(format!(
+        "view {}-{} of {} | offset {}",
+        from, to, total, ui_state.output_offset
+    ));
+
+    lines
+}
+
+fn build_tab_lines(session: &SessionState, ui_state: &mut UiState, viewport: usize) -> Vec<String> {
+    match ui_state.tab {
         DashboardTab::Help => {
             let mut help = vec!["Help".to_string(), String::new()];
             help.extend(HELP_LINES.iter().map(|line| line.to_string()));
             help
         }
-        DashboardTab::Commands => vec![
-            "Commands".to_string(),
-            String::new(),
-            "Search  - deep topic reconnaissance".to_string(),
-            "Trends  - geo + global pulse".to_string(),
-            "Profile - account intelligence snapshot".to_string(),
-            "Thread  - conversation expansion".to_string(),
-            "Article - fetch + parse linked content".to_string(),
-            String::new(),
-            "Tips".to_string(),
-            "- Press / for fast palette".to_string(),
-            "- Press Enter to execute".to_string(),
-            "- Switch tab for Output/Help".to_string(),
-        ],
-        DashboardTab::Output => {
-            let mut lines = vec!["Last run".to_string(), String::new()];
-            lines.push(format!(
-                "command: {}",
-                session.last_command.as_deref().unwrap_or("-")
-            ));
-            lines.push(format!(
-                "status: {}",
-                session.last_status.as_deref().unwrap_or("-")
-            ));
-            lines.push(String::new());
-            lines.push("output:".to_string());
-
-            if session.last_output_lines.is_empty() {
-                lines.push("(none yet)".to_string());
-            } else {
-                lines.extend(session.last_output_lines.iter().cloned());
-            }
-
-            lines
-        }
+        DashboardTab::Commands => build_command_drawer(ui_state.active_index),
+        DashboardTab::Output => output_view_lines(session, ui_state, viewport),
     }
 }
 
-fn render_dashboard(ui_state: &UiState, session: &SessionState) -> Result<()> {
+fn render_double_pane(
+    ui_state: &mut UiState,
+    session: &SessionState,
+    cols: usize,
+    rows: usize,
+) -> Result<()> {
     let theme = active_theme();
-    let (cols, rows) = terminal::size().unwrap_or((120, 32));
-    let total_rows = max(12usize, rows.saturating_sub(7) as usize);
-    let left_box_width = max(46usize, (cols as usize * 45) / 100);
-    let right_box_width = max(30usize, cols as usize - left_box_width - 1);
-    let left_inner = max(20usize, left_box_width - 2);
-    let right_inner = max(20usize, right_box_width - 2);
+    let total_rows = max(12usize, rows.saturating_sub(7));
+    let left_box_width = max(46usize, (cols * 45) / 100);
+    let right_box_width = max(30usize, cols.saturating_sub(left_box_width + 1));
+    let left_inner = max(20usize, left_box_width.saturating_sub(2));
+    let right_inner = max(20usize, right_box_width.saturating_sub(2));
 
-    let left_lines = build_left_lines(ui_state.active_index);
-    let mut right_lines = build_right_lines(session, ui_state.tab);
+    let left_lines = build_menu_lines(ui_state.active_index);
+    let mut right_lines = build_tab_lines(session, ui_state, total_rows);
     if right_lines.len() > total_rows {
         right_lines = right_lines[right_lines.len() - total_rows..].to_vec();
     }
@@ -390,7 +531,7 @@ fn render_dashboard(ui_state: &UiState, session: &SessionState) -> Result<()> {
         stdout,
         "{}+{}+{}",
         theme.border,
-        "-".repeat((cols as usize).saturating_sub(2)),
+        "-".repeat(cols.saturating_sub(2)),
         theme.reset
     )?;
     writeln!(
@@ -398,10 +539,7 @@ fn render_dashboard(ui_state: &UiState, session: &SessionState) -> Result<()> {
         "{}|{}{}{}|{}",
         theme.border,
         theme.reset,
-        pad_text(
-            &format!(" xint dashboard {}", tabs),
-            (cols as usize).saturating_sub(2)
-        ),
+        pad_text(&format!(" xint dashboard {}", tabs), cols.saturating_sub(2)),
         theme.border,
         theme.reset
     )?;
@@ -419,7 +557,6 @@ fn render_dashboard(ui_state: &UiState, session: &SessionState) -> Result<()> {
         let right_raw = right_lines.get(row).map(String::as_str).unwrap_or("");
         let left = pad_text(left_raw, left_inner);
         let right = pad_text(right_raw, right_inner);
-
         let left_segment = if left_raw.starts_with("> ") {
             format!("{}{}{}", theme.accent, left, theme.reset)
         } else {
@@ -451,13 +588,13 @@ fn render_dashboard(ui_state: &UiState, session: &SessionState) -> Result<()> {
         theme.reset
     )?;
 
-    let footer = " Up/Down Navigate | Enter Run | Tab Tabs | / Palette | ? Help | q Quit ";
+    let footer = " Up/Down Navigate | Enter Run | Tab Tabs | F Search Output | PgUp/PgDn Scroll | / Palette | q Quit ";
     writeln!(
         stdout,
         "{}|{}{}{}|{}",
         theme.border,
         theme.reset,
-        pad_text(footer, (cols as usize).saturating_sub(2)),
+        pad_text(footer, cols.saturating_sub(2)),
         theme.border,
         theme.reset
     )?;
@@ -465,12 +602,155 @@ fn render_dashboard(ui_state: &UiState, session: &SessionState) -> Result<()> {
         stdout,
         "{}+{}+{}",
         theme.border,
-        "-".repeat((cols as usize).saturating_sub(2)),
+        "-".repeat(cols.saturating_sub(2)),
         theme.reset
     )?;
 
     stdout.flush()?;
     Ok(())
+}
+
+fn render_single_pane(
+    ui_state: &mut UiState,
+    session: &SessionState,
+    cols: usize,
+    rows: usize,
+) -> Result<()> {
+    let theme = active_theme();
+    let width = max(30usize, cols.saturating_sub(2));
+    let total_rows = max(10usize, rows.saturating_sub(6));
+
+    let tabs = [
+        DashboardTab::Commands,
+        DashboardTab::Output,
+        DashboardTab::Help,
+    ]
+    .iter()
+    .enumerate()
+    .map(|(index, tab)| {
+        let label = format!("{}:{}", index + 1, tab.label());
+        if matches!(
+            (tab, ui_state.tab),
+            (DashboardTab::Commands, DashboardTab::Commands)
+                | (DashboardTab::Output, DashboardTab::Output)
+                | (DashboardTab::Help, DashboardTab::Help)
+        ) {
+            format!("{}[ {} ]{}", theme.accent, label, theme.reset)
+        } else {
+            format!("[ {} ]", label)
+        }
+    })
+    .collect::<Vec<_>>()
+    .join(" ");
+
+    let lines = if matches!(ui_state.tab, DashboardTab::Commands) {
+        let mut merged = build_menu_lines(ui_state.active_index);
+        merged.push(String::new());
+        merged.extend(build_command_drawer(ui_state.active_index));
+        merged
+    } else {
+        build_tab_lines(session, ui_state, total_rows * 2)
+    };
+
+    let mut stdout = io::stdout();
+    execute!(stdout, Clear(ClearType::All), MoveTo(0, 0))?;
+
+    writeln!(
+        stdout,
+        "{}+{}+{}",
+        theme.border,
+        "-".repeat(width),
+        theme.reset
+    )?;
+    writeln!(
+        stdout,
+        "{}|{}{}{}|{}",
+        theme.border,
+        theme.reset,
+        pad_text(&format!(" xint dashboard {}", tabs), width),
+        theme.border,
+        theme.reset
+    )?;
+    writeln!(
+        stdout,
+        "{}+{}+{}",
+        theme.border,
+        "-".repeat(width),
+        theme.reset
+    )?;
+
+    for line in lines
+        .iter()
+        .rev()
+        .take(total_rows)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+    {
+        let row = pad_text(line, width);
+        if line.starts_with("> ") {
+            writeln!(
+                stdout,
+                "{}|{}{}{}{}|{}",
+                theme.border, theme.reset, theme.accent, row, theme.reset, theme.border
+            )?;
+        } else {
+            writeln!(
+                stdout,
+                "{}|{}{}{}{}|{}",
+                theme.border, theme.reset, theme.muted, row, theme.reset, theme.border
+            )?;
+        }
+    }
+
+    let rendered = lines.len().min(total_rows);
+    for _ in rendered..total_rows {
+        writeln!(
+            stdout,
+            "{}|{}{}|{}",
+            theme.border,
+            theme.reset,
+            " ".repeat(width),
+            theme.border
+        )?;
+    }
+
+    writeln!(
+        stdout,
+        "{}+{}+{}",
+        theme.border,
+        "-".repeat(width),
+        theme.reset
+    )?;
+    let footer = " Tab Tabs | F Search Output | PgUp/PgDn Scroll | / Palette | q Quit ";
+    writeln!(
+        stdout,
+        "{}|{}{}{}|{}",
+        theme.border,
+        theme.reset,
+        pad_text(footer, width),
+        theme.border,
+        theme.reset
+    )?;
+    writeln!(
+        stdout,
+        "{}+{}+{}",
+        theme.border,
+        "-".repeat(width),
+        theme.reset
+    )?;
+
+    stdout.flush()?;
+    Ok(())
+}
+
+fn render_dashboard(ui_state: &mut UiState, session: &SessionState) -> Result<()> {
+    let (cols, rows) = terminal::size().unwrap_or((120, 32));
+    if (cols as usize) < 110 {
+        render_single_pane(ui_state, session, cols as usize, rows as usize)
+    } else {
+        render_double_pane(ui_state, session, cols as usize, rows as usize)
+    }
 }
 
 fn print_menu() {
@@ -522,16 +802,12 @@ fn select_option_interactive(session: &mut SessionState, ui_state: &mut UiState)
                     ui_state.tab = ui_state.tab.next();
                     render_dashboard(ui_state, session)?;
                 }
-                KeyCode::F(1) => {
-                    ui_state.tab = DashboardTab::Commands;
+                KeyCode::PageUp if matches!(ui_state.tab, DashboardTab::Output) => {
+                    ui_state.output_offset = ui_state.output_offset.saturating_add(10);
                     render_dashboard(ui_state, session)?;
                 }
-                KeyCode::F(2) => {
-                    ui_state.tab = DashboardTab::Output;
-                    render_dashboard(ui_state, session)?;
-                }
-                KeyCode::F(3) => {
-                    ui_state.tab = DashboardTab::Help;
+                KeyCode::PageDown if matches!(ui_state.tab, DashboardTab::Output) => {
+                    ui_state.output_offset = ui_state.output_offset.saturating_sub(10);
                     render_dashboard(ui_state, session)?;
                 }
                 KeyCode::Enter => {
@@ -548,6 +824,32 @@ fn select_option_interactive(session: &mut SessionState, ui_state: &mut UiState)
                 }
                 KeyCode::Char('?') => {
                     ui_state.tab = DashboardTab::Help;
+                    render_dashboard(ui_state, session)?;
+                }
+                KeyCode::Char('1') => {
+                    ui_state.tab = DashboardTab::Commands;
+                    render_dashboard(ui_state, session)?;
+                }
+                KeyCode::Char('2') => {
+                    ui_state.tab = DashboardTab::Output;
+                    render_dashboard(ui_state, session)?;
+                }
+                KeyCode::Char('3') => {
+                    ui_state.tab = DashboardTab::Help;
+                    render_dashboard(ui_state, session)?;
+                }
+                KeyCode::Char('f') | KeyCode::Char('F') => {
+                    terminal::disable_raw_mode()?;
+                    let query = prompt_line("\nOutput search (blank clears): ")?;
+                    terminal::enable_raw_mode()?;
+                    ui_state.output_search = query.trim().to_string();
+                    ui_state.output_offset = 0;
+                    ui_state.tab = DashboardTab::Output;
+                    session.last_status = Some(if ui_state.output_search.is_empty() {
+                        "output filter cleared".to_string()
+                    } else {
+                        format!("output filter active: {}", ui_state.output_search)
+                    });
                     render_dashboard(ui_state, session)?;
                 }
                 KeyCode::Char('/') => {
@@ -591,9 +893,9 @@ fn append_output(session: &mut SessionState, line: String) {
         return;
     }
     session.last_output_lines.push(trimmed);
-    if session.last_output_lines.len() > 120 {
+    if session.last_output_lines.len() > 1200 {
         session.last_output_lines =
-            session.last_output_lines[session.last_output_lines.len() - 120..].to_vec();
+            session.last_output_lines[session.last_output_lines.len() - 1200..].to_vec();
     }
 }
 
@@ -601,7 +903,7 @@ fn run_subcommand(
     args: &[String],
     policy_mode: PolicyMode,
     session: &mut SessionState,
-    ui_state: &UiState,
+    ui_state: &mut UiState,
 ) -> Result<()> {
     let exe = std::env::current_exe()?;
     let mut cmd = Command::new(exe);
@@ -613,6 +915,7 @@ fn run_subcommand(
 
     let mut child = cmd.spawn()?;
     session.last_output_lines.clear();
+    ui_state.output_offset = 0;
 
     let (tx, rx) = mpsc::channel::<String>();
     let mut handles = Vec::new();
@@ -695,9 +998,12 @@ pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
         .iter()
         .position(|option| option.key == "1")
         .unwrap_or(0);
+
     let mut ui_state = UiState {
         active_index: initial_index,
         tab: DashboardTab::Output,
+        output_offset: 0,
+        output_search: String::new(),
     };
 
     loop {
@@ -724,7 +1030,7 @@ pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
                     &["search".to_string(), query],
                     policy_mode,
                     &mut session,
-                    &ui_state,
+                    &mut ui_state,
                 )?;
             }
             "2" => {
@@ -743,14 +1049,14 @@ pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
                         &["trends".to_string()],
                         policy_mode,
                         &mut session,
-                        &ui_state,
+                        &mut ui_state,
                     )?;
                 } else {
                     run_subcommand(
                         &["trends".to_string(), location],
                         policy_mode,
                         &mut session,
-                        &ui_state,
+                        &mut ui_state,
                     )?;
                 }
             }
@@ -769,7 +1075,7 @@ pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
                     &["profile".to_string(), username],
                     policy_mode,
                     &mut session,
-                    &ui_state,
+                    &mut ui_state,
                 )?;
             }
             "4" => {
@@ -785,7 +1091,7 @@ pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
                     &["thread".to_string(), tweet_ref],
                     policy_mode,
                     &mut session,
-                    &ui_state,
+                    &mut ui_state,
                 )?;
             }
             "5" => {
@@ -803,7 +1109,7 @@ pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
                     &["article".to_string(), url],
                     policy_mode,
                     &mut session,
-                    &ui_state,
+                    &mut ui_state,
                 )?;
             }
             "6" => {
@@ -812,7 +1118,7 @@ pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
                     &["--help".to_string()],
                     policy_mode,
                     &mut session,
-                    &ui_state,
+                    &mut ui_state,
                 )?;
             }
             _ => {}
