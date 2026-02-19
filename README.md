@@ -31,11 +31,23 @@
 ## Install
 
 ```bash
-# From release
-curl -sL https://github.com/0xNyk/xint-rs/releases/latest/download/xint -o xint
-chmod +x xint
+curl -fsSL https://raw.githubusercontent.com/0xNyk/xint-rs/main/install.sh | bash
+```
 
-# Or build
+Optional pinned version:
+
+```bash
+XINT_RS_INSTALL_VERSION=2026.2.19.6 \
+curl -fsSL https://raw.githubusercontent.com/0xNyk/xint-rs/main/install.sh | bash
+```
+
+Homebrew (additional managed path for toolchain):
+
+```bash
+brew install rustup
+```
+
+# Or build from source
 git clone https://github.com/0xNyk/xint-rs.git
 cd xint-rs
 cargo build --release
