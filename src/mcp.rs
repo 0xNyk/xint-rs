@@ -471,6 +471,21 @@ impl MCPServer {
             .filter(|s| !s.is_empty())
     }
 
+    fn package_api_workspace_id() -> Option<String> {
+        std::env::var("XINT_WORKSPACE_ID")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    }
+
+    fn billing_upgrade_url() -> String {
+        std::env::var("XINT_BILLING_UPGRADE_URL")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "https://xint.dev/pricing".to_string())
+    }
+
     async fn call_package_api(
         &self,
         method: reqwest::Method,
@@ -486,6 +501,9 @@ impl MCPServer {
         let mut req = client.request(method, &url);
         if let Some(key) = Self::package_api_key() {
             req = req.header(reqwest::header::AUTHORIZATION, format!("Bearer {key}"));
+        }
+        if let Some(workspace_id) = Self::package_api_workspace_id() {
+            req = req.header("x-workspace-id", workspace_id);
         }
         if let Some(ref payload) = body {
             req = req
@@ -504,6 +522,25 @@ impl MCPServer {
             .map_err(|e| format!("Package API body read failed: {e}"))?;
 
         if !status.is_success() {
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
+                let code = parsed
+                    .get("code")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("UNKNOWN");
+                let error_msg = parsed
+                    .get("error")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Package API request failed");
+                let mut message =
+                    format!("Package API {} [{}]: {}", status.as_u16(), code, error_msg);
+                if matches!(
+                    code,
+                    "PLAN_REQUIRED" | "QUOTA_EXCEEDED" | "FEATURE_NOT_IN_PLAN"
+                ) {
+                    message = format!("{message}. Upgrade: {}", Self::billing_upgrade_url());
+                }
+                return Err(message);
+            }
             return Err(format!(
                 "Package API {}: {}",
                 status.as_u16(),
