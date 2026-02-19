@@ -41,10 +41,11 @@ XINT_RS_INSTALL_VERSION=2026.2.19.6 \
 curl -fsSL https://raw.githubusercontent.com/0xNyk/xint-rs/main/install.sh | bash
 ```
 
-Homebrew (additional managed path for toolchain):
+Homebrew (managed install):
 
 ```bash
-brew install rustup
+brew tap 0xNyk/xint
+brew install xint-rs
 ```
 
 # Or build from source
