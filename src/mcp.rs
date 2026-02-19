@@ -218,6 +218,105 @@ impl MCPServer {
                 }),
             },
             MCPTool {
+                name: "xint_package_create".to_string(),
+                description: "Create an agent memory package ingest job (v1 draft contract)"
+                    .to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "name": { "type": "string", "description": "Human-readable package name" },
+                        "topic_query": { "type": "string", "description": "Topic query used for ingest and refresh" },
+                        "sources": {
+                            "type": "array",
+                            "items": { "type": "string", "enum": ["x_api_v2", "xai_search", "web_article"] },
+                            "description": "Data sources to ingest"
+                        },
+                        "time_window": {
+                            "type": "object",
+                            "properties": {
+                                "from": { "type": "string", "format": "date-time" },
+                                "to": { "type": "string", "format": "date-time" }
+                            },
+                            "required": ["from", "to"]
+                        },
+                        "policy": { "type": "string", "enum": ["private", "shared_candidate"] },
+                        "analysis_profile": { "type": "string", "enum": ["summary", "analyst", "forensic"] }
+                    },
+                    "required": ["name", "topic_query", "sources", "time_window", "policy", "analysis_profile"]
+                }),
+            },
+            MCPTool {
+                name: "xint_package_status".to_string(),
+                description: "Get package metadata and freshness (v1 draft contract)".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "package_id": { "type": "string", "description": "Package identifier (pkg_*)" }
+                    },
+                    "required": ["package_id"]
+                }),
+            },
+            MCPTool {
+                name: "xint_package_query".to_string(),
+                description:
+                    "Query one or more packages and return claims with citations (v1 draft contract)"
+                        .to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "Question to ask over package memory" },
+                        "package_ids": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Package IDs included in retrieval scope"
+                        },
+                        "max_claims": { "type": "number", "description": "Maximum number of claims (default: 10)" },
+                        "require_citations": { "type": "boolean", "description": "Require citations in response (default: true)" }
+                    },
+                    "required": ["query", "package_ids"]
+                }),
+            },
+            MCPTool {
+                name: "xint_package_refresh".to_string(),
+                description:
+                    "Trigger package refresh and create a new snapshot (v1 draft contract)"
+                        .to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "package_id": { "type": "string", "description": "Package identifier" },
+                        "reason": { "type": "string", "enum": ["ttl", "manual", "event"] }
+                    },
+                    "required": ["package_id", "reason"]
+                }),
+            },
+            MCPTool {
+                name: "xint_package_search".to_string(),
+                description: "Search private and shared package catalog (v1 draft contract)"
+                    .to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "Search query for package catalog" },
+                        "limit": { "type": "number", "description": "Max packages to return (default: 20)" }
+                    },
+                    "required": ["query"]
+                }),
+            },
+            MCPTool {
+                name: "xint_package_publish".to_string(),
+                description: "Publish a package snapshot to shared catalog (v1 draft contract)"
+                    .to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "package_id": { "type": "string", "description": "Package identifier" },
+                        "snapshot_version": { "type": "number", "description": "Snapshot version to publish" }
+                    },
+                    "required": ["package_id", "snapshot_version"]
+                }),
+            },
+            MCPTool {
                 name: "xint_cache_clear".to_string(),
                 description: "Clear the xint search cache".to_string(),
                 input_schema: serde_json::json!({
@@ -290,7 +389,7 @@ impl MCPServer {
 
     fn tool_required_policy(name: &str) -> PolicyMode {
         match name {
-            "xint_bookmarks" | "xint_diff" => PolicyMode::Engagement,
+            "xint_bookmarks" | "xint_diff" | "xint_package_publish" => PolicyMode::Engagement,
             _ => PolicyMode::ReadOnly,
         }
     }
@@ -313,6 +412,11 @@ impl MCPServer {
                 | "xint_diff"
                 | "xint_report"
                 | "xint_sentiment"
+                | "xint_package_create"
+                | "xint_package_query"
+                | "xint_package_refresh"
+                | "xint_package_search"
+                | "xint_package_publish"
         )
     }
 
@@ -351,6 +455,67 @@ impl MCPServer {
             "remaining_usd": budget.remaining,
         })
         .to_string())
+    }
+
+    fn package_api_base_url() -> Option<String> {
+        std::env::var("XINT_PACKAGE_API_BASE_URL")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    }
+
+    fn package_api_key() -> Option<String> {
+        std::env::var("XINT_PACKAGE_API_KEY")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    }
+
+    async fn call_package_api(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<serde_json::Value>,
+    ) -> Result<serde_json::Value, String> {
+        let base = Self::package_api_base_url().ok_or_else(|| {
+            "XINT_PACKAGE_API_BASE_URL not set. Start local API with `xint package-api-server --port=8080` and set XINT_PACKAGE_API_BASE_URL=http://localhost:8080/v1".to_string()
+        })?;
+        let url = format!("{}{}", base.trim_end_matches('/'), path);
+
+        let client = reqwest::Client::new();
+        let mut req = client.request(method, &url);
+        if let Some(key) = Self::package_api_key() {
+            req = req.header(reqwest::header::AUTHORIZATION, format!("Bearer {key}"));
+        }
+        if let Some(ref payload) = body {
+            req = req
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .json(payload);
+        }
+
+        let res = req
+            .send()
+            .await
+            .map_err(|e| format!("Package API request failed: {e}"))?;
+        let status = res.status();
+        let text = res
+            .text()
+            .await
+            .map_err(|e| format!("Package API body read failed: {e}"))?;
+
+        if !status.is_success() {
+            return Err(format!(
+                "Package API {}: {}",
+                status.as_u16(),
+                text.chars().take(300).collect::<String>()
+            ));
+        }
+        if text.trim().is_empty() {
+            return Ok(serde_json::json!({}));
+        }
+
+        serde_json::from_str::<serde_json::Value>(&text)
+            .map_err(|e| format!("Package API JSON decode failed: {e}"))
     }
 
     pub async fn handle_message(&mut self, msg: &str) -> Result<Option<String>, String> {
@@ -593,6 +758,157 @@ impl MCPServer {
                 content_type: "text".to_string(),
                 text: "Bookmarks: OAuth required".to_string(),
             }]),
+            "xint_package_create" => Ok(vec![MCPContent {
+                content_type: "text".to_string(),
+                text: serde_json::to_string_pretty(
+                    &self
+                        .call_package_api(
+                            reqwest::Method::POST,
+                            "/packages",
+                            Some(serde_json::json!({
+                                "name": args.get("name").and_then(|v| v.as_str()).unwrap_or(""),
+                                "topic_query": args
+                                    .get("topic_query")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or(""),
+                                "sources": args
+                                    .get("sources")
+                                    .and_then(|v| v.as_array())
+                                    .cloned()
+                                    .unwrap_or_default(),
+                                "time_window": args.get("time_window").cloned().unwrap_or_else(|| {
+                                    serde_json::json!({
+                                        "from": chrono::Utc::now()
+                                            .checked_sub_signed(chrono::Duration::days(1))
+                                            .unwrap_or_else(chrono::Utc::now)
+                                            .to_rfc3339(),
+                                        "to": chrono::Utc::now().to_rfc3339()
+                                    })
+                                }),
+                                "policy": args
+                                    .get("policy")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("private"),
+                                "analysis_profile": args
+                                    .get("analysis_profile")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("summary")
+                            })),
+                        )
+                        .await?,
+                )
+                .unwrap_or_else(|_| "{}".to_string()),
+            }]),
+            "xint_package_status" => {
+                let package_id = args
+                    .get("package_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or("Missing package_id")?;
+                let result = self
+                    .call_package_api(
+                        reqwest::Method::GET,
+                        &format!("/packages/{package_id}"),
+                        None,
+                    )
+                    .await?;
+                Ok(vec![MCPContent {
+                    content_type: "text".to_string(),
+                    text: serde_json::to_string_pretty(&result)
+                        .unwrap_or_else(|_| result.to_string()),
+                }])
+            }
+            "xint_package_query" => {
+                let query = args
+                    .get("query")
+                    .and_then(|v| v.as_str())
+                    .ok_or("Missing query")?;
+                let package_ids = args
+                    .get("package_ids")
+                    .and_then(|v| v.as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                if package_ids.is_empty() {
+                    return Err("Missing package_ids".to_string());
+                }
+                let payload = serde_json::json!({
+                    "query": query,
+                    "package_ids": package_ids,
+                    "max_claims": args.get("max_claims").and_then(|v| v.as_u64()).unwrap_or(10),
+                    "require_citations": args
+                        .get("require_citations")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true)
+                });
+                let result = self
+                    .call_package_api(reqwest::Method::POST, "/query", Some(payload))
+                    .await?;
+                Ok(vec![MCPContent {
+                    content_type: "text".to_string(),
+                    text: serde_json::to_string_pretty(&result)
+                        .unwrap_or_else(|_| result.to_string()),
+                }])
+            }
+            "xint_package_refresh" => {
+                let package_id = args
+                    .get("package_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or("Missing package_id")?;
+                let reason = args
+                    .get("reason")
+                    .and_then(|v| v.as_str())
+                    .ok_or("Missing reason")?;
+                let result = self
+                    .call_package_api(
+                        reqwest::Method::POST,
+                        &format!("/packages/{package_id}/refresh"),
+                        Some(serde_json::json!({ "reason": reason })),
+                    )
+                    .await?;
+                Ok(vec![MCPContent {
+                    content_type: "text".to_string(),
+                    text: serde_json::to_string_pretty(&result)
+                        .unwrap_or_else(|_| result.to_string()),
+                }])
+            }
+            "xint_package_search" => {
+                let query = args
+                    .get("query")
+                    .and_then(|v| v.as_str())
+                    .ok_or("Missing query")?;
+                let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20);
+                let query_encoded = query.replace(' ', "%20");
+                let path = format!("/packages/search?q={query_encoded}&limit={limit}");
+                let result = self
+                    .call_package_api(reqwest::Method::GET, &path, None)
+                    .await?;
+                Ok(vec![MCPContent {
+                    content_type: "text".to_string(),
+                    text: serde_json::to_string_pretty(&result)
+                        .unwrap_or_else(|_| result.to_string()),
+                }])
+            }
+            "xint_package_publish" => {
+                let package_id = args
+                    .get("package_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or("Missing package_id")?;
+                let snapshot_version = args
+                    .get("snapshot_version")
+                    .and_then(|v| v.as_u64())
+                    .ok_or("Missing snapshot_version")?;
+                let result = self
+                    .call_package_api(
+                        reqwest::Method::POST,
+                        &format!("/packages/{package_id}/publish"),
+                        Some(serde_json::json!({ "snapshot_version": snapshot_version })),
+                    )
+                    .await?;
+                Ok(vec![MCPContent {
+                    content_type: "text".to_string(),
+                    text: serde_json::to_string_pretty(&result)
+                        .unwrap_or_else(|_| result.to_string()),
+                }])
+            }
             "xint_cache_clear" => Ok(vec![MCPContent {
                 content_type: "text".to_string(),
                 text: "Cache cleared".to_string(),
