@@ -259,6 +259,9 @@ xint media 1900100012345678901 --name-template "{username}-{created_at}-{index}"
 xint report "AI agents" --save
 xint analyze "What's trending in crypto?"
 xint article "https://..." --ai "Summarize"
+
+# From X tweet (auto-extract linked article URL)
+xint article "https://x.com/user/status/123" --ai "Summarize"
 ```
 
 ## xAI Features
@@ -314,6 +317,7 @@ xint costs budget 2  # Set $2/day limit
 |----------|----------|-------------|
 | `X_BEARER_TOKEN` | Yes | X API v2 bearer |
 | `XAI_API_KEY` | No | xAI for analyze/report |
+| `XINT_ARTICLE_TIMEOUT_SEC` | No | Article fetch timeout seconds (default 30, range 5-120) |
 | `X_CLIENT_ID` | No | OAuth for write ops |
 
 ## Structure

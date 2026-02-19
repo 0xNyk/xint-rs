@@ -31,9 +31,11 @@ pub async fn run(args: &ArticleArgs, config: &Config) -> Result<()> {
 
     let parsed = url::Url::parse(&url).map_err(|_| anyhow::anyhow!("Invalid URL: {url}"))?;
     let domain = parsed.host_str().unwrap_or("").to_string();
+    let timeout_secs = resolve_article_timeout_secs();
 
     let http = reqwest::Client::new();
-    let raw = xai::web_search_article(&http, xai_api_key, &url, &domain, &args.model, 30).await?;
+    let raw = xai::web_search_article(&http, xai_api_key, &url, &domain, &args.model, timeout_secs)
+        .await?;
 
     let article = parse_article_json(&raw, &url, &domain, args.full);
 
@@ -66,6 +68,15 @@ pub async fn run(args: &ArticleArgs, config: &Config) -> Result<()> {
 
 fn is_x_tweet_like_url(value: &str) -> bool {
     extract_tweet_id(value).is_some()
+}
+
+fn resolve_article_timeout_secs() -> u64 {
+    const DEFAULT_TIMEOUT_SECS: u64 = 30;
+    let parsed = std::env::var("XINT_ARTICLE_TIMEOUT_SEC")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(DEFAULT_TIMEOUT_SECS);
+    parsed.clamp(5, 120)
 }
 
 fn extract_tweet_id(input: &str) -> Option<String> {
@@ -247,7 +258,7 @@ fn format_article(article: &Article) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_tweet_id, pick_article_url_from_tweet};
+    use super::{extract_tweet_id, pick_article_url_from_tweet, resolve_article_timeout_secs};
     use crate::models::{Tweet, TweetMetrics, UrlEntity};
 
     fn fake_tweet(urls: Vec<UrlEntity>) -> Tweet {
@@ -323,5 +334,19 @@ mod tests {
             pick_article_url_from_tweet(&tweet),
             Some("https://x.com/i/article/xyz".to_string())
         );
+    }
+
+    #[test]
+    fn article_timeout_defaults_and_clamps() {
+        std::env::remove_var("XINT_ARTICLE_TIMEOUT_SEC");
+        assert_eq!(resolve_article_timeout_secs(), 30);
+
+        std::env::set_var("XINT_ARTICLE_TIMEOUT_SEC", "1");
+        assert_eq!(resolve_article_timeout_secs(), 5);
+
+        std::env::set_var("XINT_ARTICLE_TIMEOUT_SEC", "999");
+        assert_eq!(resolve_article_timeout_secs(), 120);
+
+        std::env::remove_var("XINT_ARTICLE_TIMEOUT_SEC");
     }
 }

@@ -233,7 +233,16 @@ pub async fn web_search_article(
         .timeout(std::time::Duration::from_secs(timeout_secs))
         .json(&body)
         .send()
-        .await?;
+        .await
+        .map_err(|err| {
+            if err.is_timeout() {
+                anyhow::anyhow!(
+                    "Article fetch timed out after {timeout_secs}s for {url}. Set XINT_ARTICLE_TIMEOUT_SEC (5-120) to tune this."
+                )
+            } else {
+                anyhow::anyhow!("Article fetch request failed for {url}: {err}")
+            }
+        })?;
 
     let status = res.status().as_u16();
     if !res.status().is_success() {
@@ -276,7 +285,7 @@ pub async fn web_search_article(
         }
     }
 
-    bail!("No content returned for {url}")
+    bail!("No article content returned for {url}. The source may be blocked/unavailable from this environment.")
 }
 
 // ---------------------------------------------------------------------------
