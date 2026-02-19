@@ -1,21 +1,32 @@
 use anyhow::Result;
 
 use crate::api::grok;
+use crate::api::twitter;
 use crate::api::xai;
 use crate::cli::ArticleArgs;
+use crate::client::XClient;
 use crate::config::Config;
-use crate::models::Article;
+use crate::models::{Article, Tweet};
 
 pub async fn run(args: &ArticleArgs, config: &Config) -> Result<()> {
     let xai_api_key = config.require_xai_key()?;
 
-    let url = args.url.clone();
+    let mut url = args.url.clone();
 
-    // Check if it's an X tweet URL - warn user
-    if url.contains("x.com/") && url.contains("/status/") {
-        println!("📝 X tweet URLs not supported in Rust version yet.");
-        println!("   Please provide a direct article URL.");
-        return Ok(());
+    if is_x_tweet_like_url(&url) {
+        println!("🔍 Fetching tweet to extract linked article...");
+        let token = config.require_bearer_token()?;
+        let client = XClient::new()?;
+        let (tweet, article_url) = fetch_tweet_for_article(&client, token, &url).await?;
+        if let Some(found) = article_url {
+            println!("📝 Tweet: {}", tweet.tweet_url);
+            println!("📄 Found link: {found}\n");
+            url = found;
+        } else {
+            println!("📝 No external link found in tweet.");
+            println!("   Tweet: {}", tweet.tweet_url);
+            return Ok(());
+        }
     }
 
     let parsed = url::Url::parse(&url).map_err(|_| anyhow::anyhow!("Invalid URL: {url}"))?;
@@ -51,6 +62,84 @@ pub async fn run(args: &ArticleArgs, config: &Config) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn is_x_tweet_like_url(value: &str) -> bool {
+    extract_tweet_id(value).is_some()
+}
+
+fn extract_tweet_id(input: &str) -> Option<String> {
+    let trimmed = input.trim();
+    if trimmed.chars().all(|c| c.is_ascii_digit()) {
+        return Some(trimmed.to_string());
+    }
+
+    let status_idx = trimmed.find("/status/")?;
+    let id_part = &trimmed[status_idx + "/status/".len()..];
+    let digits: String = id_part.chars().take_while(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() {
+        None
+    } else {
+        Some(digits)
+    }
+}
+
+fn is_x_article_url(raw: &str) -> bool {
+    if let Ok(url) = url::Url::parse(raw) {
+        let host = url.host_str().unwrap_or_default();
+        return host.eq_ignore_ascii_case("x.com") && url.path().starts_with("/i/article/");
+    }
+    false
+}
+
+fn is_external_non_x_url(raw: &str) -> bool {
+    if let Ok(url) = url::Url::parse(raw) {
+        let host = url.host_str().unwrap_or_default().to_ascii_lowercase();
+        return host != "x.com"
+            && host != "twitter.com"
+            && !host.ends_with(".x.com")
+            && !host.ends_with(".twitter.com");
+    }
+    false
+}
+
+fn pick_article_url_from_tweet(tweet: &Tweet) -> Option<String> {
+    let mut candidates: Vec<String> = Vec::new();
+    for item in &tweet.urls {
+        if !item.url.is_empty() {
+            candidates.push(item.url.clone());
+        }
+        if let Some(unwound) = &item.unwound_url {
+            if !unwound.is_empty() {
+                candidates.push(unwound.clone());
+            }
+        }
+    }
+
+    candidates.sort();
+    candidates.dedup();
+
+    if let Some(url) = candidates.iter().find(|url| is_external_non_x_url(url)) {
+        return Some(url.clone());
+    }
+    if let Some(url) = candidates.iter().find(|url| is_x_article_url(url)) {
+        return Some(url.clone());
+    }
+    candidates.into_iter().next()
+}
+
+async fn fetch_tweet_for_article(
+    client: &XClient,
+    token: &str,
+    tweet_url: &str,
+) -> Result<(Tweet, Option<String>)> {
+    let tweet_id = extract_tweet_id(tweet_url)
+        .ok_or_else(|| anyhow::anyhow!("Invalid X tweet URL: {tweet_url}"))?;
+    let tweet = twitter::get_tweet(client, token, &tweet_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("Tweet not found: {tweet_id}"))?;
+    let article_url = pick_article_url_from_tweet(&tweet);
+    Ok((tweet, article_url))
 }
 
 fn parse_article_json(raw: &str, url: &str, domain: &str, full: bool) -> Article {
@@ -154,4 +243,85 @@ fn format_article(article: &Article) -> String {
     }
     out.push_str(&format!("\n---\n\n{}", article.content));
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{extract_tweet_id, pick_article_url_from_tweet};
+    use crate::models::{Tweet, TweetMetrics, UrlEntity};
+
+    fn fake_tweet(urls: Vec<UrlEntity>) -> Tweet {
+        Tweet {
+            id: "1900100012345678901".to_string(),
+            text: "tweet".to_string(),
+            author_id: "1".to_string(),
+            username: "alice".to_string(),
+            name: "Alice".to_string(),
+            created_at: "2026-02-19T00:00:00Z".to_string(),
+            conversation_id: "1900100012345678901".to_string(),
+            metrics: TweetMetrics {
+                likes: 0,
+                retweets: 0,
+                replies: 0,
+                quotes: 0,
+                impressions: 0,
+                bookmarks: 0,
+            },
+            urls,
+            mentions: vec![],
+            hashtags: vec![],
+            tweet_url: "https://x.com/alice/status/1900100012345678901".to_string(),
+        }
+    }
+
+    #[test]
+    fn extract_tweet_id_supports_status_urls() {
+        assert_eq!(
+            extract_tweet_id("https://x.com/user/status/1900100012345678901"),
+            Some("1900100012345678901".to_string())
+        );
+        assert_eq!(
+            extract_tweet_id("https://twitter.com/i/web/status/1900100012345678901"),
+            Some("1900100012345678901".to_string())
+        );
+    }
+
+    #[test]
+    fn pick_article_url_prefers_external_link() {
+        let tweet = fake_tweet(vec![
+            UrlEntity {
+                url: "https://x.com/i/article/abc".to_string(),
+                title: None,
+                description: None,
+                unwound_url: None,
+                images: None,
+            },
+            UrlEntity {
+                url: "https://example.com/deep-dive".to_string(),
+                title: None,
+                description: None,
+                unwound_url: None,
+                images: None,
+            },
+        ]);
+        assert_eq!(
+            pick_article_url_from_tweet(&tweet),
+            Some("https://example.com/deep-dive".to_string())
+        );
+    }
+
+    #[test]
+    fn pick_article_url_falls_back_to_x_article() {
+        let tweet = fake_tweet(vec![UrlEntity {
+            url: "https://x.com/i/article/xyz".to_string(),
+            title: None,
+            description: None,
+            unwound_url: None,
+            images: None,
+        }]);
+        assert_eq!(
+            pick_article_url_from_tweet(&tweet),
+            Some("https://x.com/i/article/xyz".to_string())
+        );
+    }
 }
