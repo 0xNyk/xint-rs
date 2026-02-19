@@ -242,6 +242,18 @@ fn prompt_with_default(label: &str, previous: Option<&str>) -> Result<String> {
     }
 }
 
+fn prompt_with_default_dashboard(
+    label: &str,
+    previous: Option<&str>,
+    session: &SessionState,
+    ui_state: &mut UiState,
+) -> Result<String> {
+    if io::stdin().is_terminal() && io::stdout().is_terminal() {
+        render_dashboard(ui_state, session)?;
+    }
+    prompt_with_default(label, previous)
+}
+
 fn normalize_choice(raw: &str) -> Option<&'static str> {
     let value = raw.trim().to_ascii_lowercase();
     if value.is_empty() {
@@ -815,7 +827,6 @@ fn select_option_interactive(session: &mut SessionState, ui_state: &mut UiState)
                         .get(ui_state.active_index)
                         .map(|option| option.key.to_string())
                         .unwrap_or_else(|| "0".to_string());
-                    execute!(io::stdout(), Clear(ClearType::All), MoveTo(0, 0))?;
                     return Ok(selected);
                 }
                 KeyCode::Char('q') | KeyCode::Esc => {
@@ -862,7 +873,6 @@ fn select_option_interactive(session: &mut SessionState, ui_state: &mut UiState)
                             .get(ui_state.active_index)
                             .map(|option| option.key.to_string())
                             .unwrap_or_else(|| "0".to_string());
-                        execute!(io::stdout(), Clear(ClearType::All), MoveTo(0, 0))?;
                         return Ok(selected);
                     }
                     session.last_status = Some(format!(
@@ -877,7 +887,6 @@ fn select_option_interactive(session: &mut SessionState, ui_state: &mut UiState)
                 }
                 KeyCode::Char(ch) => {
                     if let Some(value) = normalize_choice(&ch.to_string()) {
-                        execute!(io::stdout(), Clear(ClearType::All), MoveTo(0, 0))?;
                         return Ok(value.to_string());
                     }
                 }
@@ -1019,7 +1028,12 @@ pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
                 break;
             }
             "1" => {
-                let query = prompt_with_default("Search query", session.last_search.as_deref())?;
+                let query = prompt_with_default_dashboard(
+                    "Search query",
+                    session.last_search.as_deref(),
+                    &session,
+                    &mut ui_state,
+                )?;
                 if query.is_empty() {
                     session.last_status = Some("query is required".to_string());
                     continue;
@@ -1034,9 +1048,11 @@ pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
                 )?;
             }
             "2" => {
-                let location = prompt_with_default(
+                let location = prompt_with_default_dashboard(
                     "Location (blank for worldwide)",
                     session.last_location.as_deref(),
+                    &session,
+                    &mut ui_state,
                 )?;
                 session.last_location = Some(location.clone());
                 session.last_command = if location.is_empty() {
@@ -1061,10 +1077,14 @@ pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
                 }
             }
             "3" => {
-                let username =
-                    prompt_with_default("Username (@optional)", session.last_username.as_deref())?
-                        .trim_start_matches('@')
-                        .to_string();
+                let username = prompt_with_default_dashboard(
+                    "Username (@optional)",
+                    session.last_username.as_deref(),
+                    &session,
+                    &mut ui_state,
+                )?
+                .trim_start_matches('@')
+                .to_string();
                 if username.is_empty() {
                     session.last_status = Some("username is required".to_string());
                     continue;
@@ -1079,8 +1099,12 @@ pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
                 )?;
             }
             "4" => {
-                let tweet_ref =
-                    prompt_with_default("Tweet ID or URL", session.last_tweet_ref.as_deref())?;
+                let tweet_ref = prompt_with_default_dashboard(
+                    "Tweet ID or URL",
+                    session.last_tweet_ref.as_deref(),
+                    &session,
+                    &mut ui_state,
+                )?;
                 if tweet_ref.is_empty() {
                     session.last_status = Some("tweet id/url is required".to_string());
                     continue;
@@ -1095,9 +1119,11 @@ pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
                 )?;
             }
             "5" => {
-                let url = prompt_with_default(
+                let url = prompt_with_default_dashboard(
                     "Article URL or Tweet URL",
                     session.last_article_url.as_deref(),
+                    &session,
+                    &mut ui_state,
                 )?;
                 if url.is_empty() {
                     session.last_status = Some("article url is required".to_string());
