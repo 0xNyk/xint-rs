@@ -1050,3 +1050,197 @@ pub async fn run(args: McpArgs, config: &Config, global_policy: PolicyMode) -> a
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use std::sync::{Mutex, OnceLock};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+    use tokio::sync::oneshot;
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn save_env(key: &str) -> Option<String> {
+        env::var(key).ok()
+    }
+
+    fn restore_env(key: &str, value: Option<String>) {
+        if let Some(v) = value {
+            env::set_var(key, v);
+        } else {
+            env::remove_var(key);
+        }
+    }
+
+    async fn spawn_mock_server(
+        status_code: u16,
+        response_body: &str,
+    ) -> (
+        String,
+        oneshot::Receiver<String>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test listener");
+        let addr = listener.local_addr().expect("listener local addr");
+        let (tx, rx) = oneshot::channel();
+        let body = response_body.to_string();
+
+        let handle = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("accept test connection");
+            let mut buf = Vec::new();
+            let mut chunk = [0_u8; 4096];
+
+            loop {
+                let read = socket.read(&mut chunk).await.expect("read request");
+                if read == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&chunk[..read]);
+
+                let header_end = buf.windows(4).position(|w| w == b"\r\n\r\n");
+                if let Some(end) = header_end {
+                    let headers = String::from_utf8_lossy(&buf[..end + 4]).to_string();
+                    let content_length = headers
+                        .lines()
+                        .find_map(|line| {
+                            let mut parts = line.splitn(2, ':');
+                            let name = parts.next()?.trim().to_lowercase();
+                            let value = parts.next()?.trim();
+                            if name == "content-length" {
+                                return value.parse::<usize>().ok();
+                            }
+                            None
+                        })
+                        .unwrap_or(0);
+                    let total_needed = end + 4 + content_length;
+                    if buf.len() >= total_needed {
+                        break;
+                    }
+                }
+            }
+
+            let request_raw = String::from_utf8_lossy(&buf).to_string();
+            let _ = tx.send(request_raw);
+
+            let status_text = match status_code {
+                202 => "Accepted",
+                402 => "Payment Required",
+                _ => "OK",
+            };
+            let response = format!(
+                "HTTP/1.1 {status_code} {status_text}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            socket
+                .write_all(response.as_bytes())
+                .await
+                .expect("write response");
+        });
+
+        (format!("http://{addr}/v1"), rx, handle)
+    }
+
+    #[tokio::test]
+    async fn package_create_contract_request_includes_headers_and_payload() {
+        let _guard = env_lock().lock().expect("env lock");
+        let prev_base = save_env("XINT_PACKAGE_API_BASE_URL");
+        let prev_key = save_env("XINT_PACKAGE_API_KEY");
+        let prev_workspace = save_env("XINT_WORKSPACE_ID");
+
+        let (base_url, req_rx, server_task) =
+            spawn_mock_server(202, r#"{"package_id":"pkg_123","status":"queued"}"#).await;
+        env::set_var("XINT_PACKAGE_API_BASE_URL", base_url);
+        env::set_var("XINT_PACKAGE_API_KEY", "xck_contract");
+        env::set_var("XINT_WORKSPACE_ID", "ws_contract");
+
+        let server = MCPServer::new(
+            PolicyMode::ReadOnly,
+            false,
+            PathBuf::from("/tmp/xint-rs-test-costs.json"),
+            PathBuf::from("/tmp/xint-rs-test-reliability.json"),
+        );
+
+        let result = server
+            .execute_tool(
+                "xint_package_create",
+                serde_json::json!({
+                    "name": "Contract package",
+                    "topic_query": "ai agents",
+                    "sources": ["x_api_v2"],
+                    "time_window": {
+                        "from": "2026-01-01T00:00:00.000Z",
+                        "to": "2026-01-02T00:00:00.000Z"
+                    },
+                    "policy": "private",
+                    "analysis_profile": "summary"
+                }),
+            )
+            .await
+            .expect("package create call");
+
+        let request_raw = req_rx.await.expect("captured request");
+        server_task.await.expect("server task");
+
+        let lower = request_raw.to_lowercase();
+        assert!(lower.contains("post /v1/packages http/1.1"));
+        assert!(lower.contains("authorization: bearer xck_contract"));
+        assert!(lower.contains("x-workspace-id: ws_contract"));
+        assert!(request_raw.contains("\"name\":\"Contract package\""));
+        assert!(request_raw.contains("\"topic_query\":\"ai agents\""));
+        assert!(request_raw.contains("\"analysis_profile\":\"summary\""));
+        assert!(result[0].text.contains("\"package_id\": \"pkg_123\""));
+
+        restore_env("XINT_PACKAGE_API_BASE_URL", prev_base);
+        restore_env("XINT_PACKAGE_API_KEY", prev_key);
+        restore_env("XINT_WORKSPACE_ID", prev_workspace);
+    }
+
+    #[tokio::test]
+    async fn quota_error_includes_upgrade_url() {
+        let _guard = env_lock().lock().expect("env lock");
+        let prev_base = save_env("XINT_PACKAGE_API_BASE_URL");
+        let prev_upgrade = save_env("XINT_BILLING_UPGRADE_URL");
+
+        let (base_url, _req_rx, server_task) = spawn_mock_server(
+            402,
+            r#"{"code":"QUOTA_EXCEEDED","error":"Package limit reached for current plan."}"#,
+        )
+        .await;
+        env::set_var("XINT_PACKAGE_API_BASE_URL", base_url);
+        env::set_var(
+            "XINT_BILLING_UPGRADE_URL",
+            "https://xint.dev/pricing?src=contract-test",
+        );
+
+        let server = MCPServer::new(
+            PolicyMode::ReadOnly,
+            false,
+            PathBuf::from("/tmp/xint-rs-test-costs.json"),
+            PathBuf::from("/tmp/xint-rs-test-reliability.json"),
+        );
+
+        let err = server
+            .call_package_api(
+                reqwest::Method::POST,
+                "/packages",
+                Some(serde_json::json!({})),
+            )
+            .await
+            .expect_err("expected quota error");
+        server_task.await.expect("server task");
+
+        assert!(err.contains("QUOTA_EXCEEDED"));
+        assert!(err.contains("Upgrade: https://xint.dev/pricing?src=contract-test"));
+
+        restore_env("XINT_PACKAGE_API_BASE_URL", prev_base);
+        restore_env("XINT_BILLING_UPGRADE_URL", prev_upgrade);
+    }
+}
