@@ -1,6 +1,7 @@
 use std::cmp::max;
-use std::io::{self, IsTerminal, Read, Write};
+use std::io::{self, BufRead, BufReader, IsTerminal, Write};
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
@@ -30,6 +31,13 @@ struct MenuOption {
     label: &'static str,
     aliases: &'static [&'static str],
     hint: &'static str,
+}
+
+struct Theme {
+    accent: &'static str,
+    border: &'static str,
+    muted: &'static str,
+    reset: &'static str,
 }
 
 const MENU_OPTIONS: &[MenuOption] = &[
@@ -77,6 +85,42 @@ const MENU_OPTIONS: &[MenuOption] = &[
     },
 ];
 
+const HELP_LINES: &[&str] = &[
+    "Hotkeys",
+    "  Up/Down: Move selection",
+    "  Enter: Run selected command",
+    "  /: Command palette",
+    "  ?: Toggle help",
+    "  q or Esc: Exit",
+];
+
+fn active_theme() -> Theme {
+    match std::env::var("XINT_TUI_THEME")
+        .unwrap_or_else(|_| "classic".to_string())
+        .to_lowercase()
+        .as_str()
+    {
+        "minimal" => Theme {
+            accent: "\x1b[1m",
+            border: "",
+            muted: "",
+            reset: "\x1b[0m",
+        },
+        "neon" => Theme {
+            accent: "\x1b[1;95m",
+            border: "\x1b[38;5;45m",
+            muted: "\x1b[38;5;244m",
+            reset: "\x1b[0m",
+        },
+        _ => Theme {
+            accent: "\x1b[1;36m",
+            border: "\x1b[2m",
+            muted: "\x1b[2m",
+            reset: "\x1b[0m",
+        },
+    }
+}
+
 fn prompt_line(label: &str) -> Result<String> {
     print!("{label}");
     io::stdout().flush()?;
@@ -114,31 +158,90 @@ fn normalize_choice(raw: &str) -> Option<&'static str> {
     None
 }
 
+fn score_option(option: &MenuOption, query: &str) -> usize {
+    let q = query.to_ascii_lowercase();
+    if q.is_empty() {
+        return 0;
+    }
+    let mut score = 0usize;
+    if option.key == q {
+        score += 100;
+    }
+    if option.label.eq_ignore_ascii_case(&q) {
+        score += 90;
+    }
+    if option
+        .aliases
+        .iter()
+        .any(|alias| alias.eq_ignore_ascii_case(&q))
+    {
+        score += 80;
+    }
+    if option.label.to_ascii_lowercase().starts_with(&q) {
+        score += 70;
+    }
+    if option
+        .aliases
+        .iter()
+        .any(|alias| alias.to_ascii_lowercase().starts_with(&q))
+    {
+        score += 60;
+    }
+    if option.label.to_ascii_lowercase().contains(&q) {
+        score += 40;
+    }
+    if option.hint.to_ascii_lowercase().contains(&q) {
+        score += 20;
+    }
+    score
+}
+
+fn match_palette(query: &str) -> Option<usize> {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let mut best_index = None;
+    let mut best_score = 0usize;
+    for (index, option) in MENU_OPTIONS.iter().enumerate() {
+        let score = score_option(option, trimmed);
+        if score > best_score {
+            best_score = score;
+            best_index = Some(index);
+        }
+    }
+
+    if best_score > 0 {
+        best_index
+    } else {
+        None
+    }
+}
+
 fn clip_text(value: &str, width: usize) -> String {
     if width == 0 {
         return String::new();
     }
-    let mut out = String::new();
-    for ch in value.chars() {
-        if out.chars().count() >= width {
-            break;
-        }
-        out.push(ch);
+
+    let count = value.chars().count();
+    if count <= width {
+        return value.to_string();
     }
-    if value.chars().count() > width {
-        if width <= 3 {
-            return ".".repeat(width);
-        }
-        let mut trimmed = out.chars().take(width - 3).collect::<String>();
-        trimmed.push_str("...");
-        return trimmed;
+
+    if width <= 3 {
+        return ".".repeat(width);
     }
+
+    let mut out = value.chars().take(width - 3).collect::<String>();
+    out.push_str("...");
     out
 }
 
 fn pad_text(value: &str, width: usize) -> String {
     let clipped = clip_text(value, width);
-    if clipped.chars().count() >= width {
+    let len = clipped.chars().count();
+    if len >= width {
         clipped
     } else {
         format!("{clipped:<width$}")
@@ -148,7 +251,8 @@ fn pad_text(value: &str, width: usize) -> String {
 fn build_left_lines(active_index: usize) -> Vec<String> {
     let mut lines = vec![
         "=== xint interactive ===".to_string(),
-        "Use Up/Down + Enter. Press q to exit.".to_string(),
+        String::new(),
+        "Menu".to_string(),
         String::new(),
     ];
 
@@ -169,7 +273,13 @@ fn build_left_lines(active_index: usize) -> Vec<String> {
     lines
 }
 
-fn build_right_lines(session: &SessionState) -> Vec<String> {
+fn build_right_lines(session: &SessionState, show_help: bool) -> Vec<String> {
+    if show_help {
+        let mut help = vec!["=== help ===".to_string()];
+        help.extend(HELP_LINES.iter().map(|line| line.to_string()));
+        return help;
+    }
+
     let mut lines = vec![
         "=== last run ===".to_string(),
         format!(
@@ -190,14 +300,15 @@ fn build_right_lines(session: &SessionState) -> Vec<String> {
     lines
 }
 
-fn render_dashboard(active_index: usize, session: &SessionState) -> Result<()> {
+fn render_dashboard(active_index: usize, session: &SessionState, show_help: bool) -> Result<()> {
+    let theme = active_theme();
     let (cols, rows) = terminal::size().unwrap_or((120, 32));
-    let total_rows = max(14usize, rows.saturating_sub(1) as usize);
+    let total_rows = max(14usize, rows.saturating_sub(2) as usize);
     let left_width = max(42usize, (cols as usize * 45) / 100);
     let right_width = max(24usize, cols as usize - left_width - 3);
 
     let left_lines = build_left_lines(active_index);
-    let mut right_lines = build_right_lines(session);
+    let mut right_lines = build_right_lines(session, show_help);
     if right_lines.len() > total_rows {
         right_lines = right_lines[right_lines.len() - total_rows..].to_vec();
     }
@@ -212,12 +323,28 @@ fn render_dashboard(active_index: usize, session: &SessionState) -> Result<()> {
         let right = pad_text(right_raw, right_width);
 
         if left_raw.starts_with("> ") {
-            writeln!(stdout, "\x1b[1;36m{left}\x1b[0m | {right}")?;
+            writeln!(
+                stdout,
+                "{}{}{} | {}",
+                theme.accent, left, theme.reset, right
+            )?;
         } else {
-            writeln!(stdout, "{left} | {right}")?;
+            writeln!(
+                stdout,
+                "{}{}{}{} | {}{}{}",
+                theme.muted, left, theme.reset, theme.border, theme.muted, right, theme.reset,
+            )?;
         }
     }
 
+    let footer = " ↑↓ Navigate | Enter Run | / Palette | ? Help | q Quit ";
+    writeln!(
+        stdout,
+        "{}{}{}",
+        theme.border,
+        pad_text(footer, cols as usize),
+        theme.reset
+    )?;
     stdout.flush()?;
     Ok(())
 }
@@ -236,7 +363,7 @@ fn print_menu() {
 }
 
 fn select_option_interactive(
-    session: &SessionState,
+    session: &mut SessionState,
     active_index_ref: &mut usize,
 ) -> Result<String> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
@@ -253,7 +380,9 @@ fn select_option_interactive(
 
     terminal::enable_raw_mode()?;
     let _raw_mode_guard = RawModeGuard;
-    render_dashboard(*active_index_ref, session)?;
+    let mut show_help = false;
+
+    render_dashboard(*active_index_ref, session, show_help)?;
 
     loop {
         if let Event::Key(key_event) = event::read()? {
@@ -264,11 +393,11 @@ fn select_option_interactive(
                     } else {
                         *active_index_ref - 1
                     };
-                    render_dashboard(*active_index_ref, session)?;
+                    render_dashboard(*active_index_ref, session, show_help)?;
                 }
                 KeyCode::Down => {
                     *active_index_ref = (*active_index_ref + 1) % MENU_OPTIONS.len();
-                    render_dashboard(*active_index_ref, session)?;
+                    render_dashboard(*active_index_ref, session, show_help)?;
                 }
                 KeyCode::Enter => {
                     let selected = MENU_OPTIONS
@@ -278,16 +407,42 @@ fn select_option_interactive(
                     execute!(io::stdout(), Clear(ClearType::All), MoveTo(0, 0))?;
                     return Ok(selected);
                 }
+                KeyCode::Char('q') | KeyCode::Esc => {
+                    execute!(io::stdout(), Clear(ClearType::All), MoveTo(0, 0))?;
+                    return Ok("0".to_string());
+                }
+                KeyCode::Char('?') => {
+                    show_help = !show_help;
+                    render_dashboard(*active_index_ref, session, show_help)?;
+                }
+                KeyCode::Char('/') => {
+                    terminal::disable_raw_mode()?;
+                    let query = prompt_line("\nPalette (/): ")?;
+                    terminal::enable_raw_mode()?;
+                    if let Some(index) = match_palette(&query) {
+                        *active_index_ref = index;
+                        let selected = MENU_OPTIONS
+                            .get(*active_index_ref)
+                            .map(|option| option.key.to_string())
+                            .unwrap_or_else(|| "0".to_string());
+                        execute!(io::stdout(), Clear(ClearType::All), MoveTo(0, 0))?;
+                        return Ok(selected);
+                    }
+                    session.last_status = Some(format!(
+                        "no palette match: {}",
+                        if query.trim().is_empty() {
+                            "(empty)"
+                        } else {
+                            query.trim()
+                        }
+                    ));
+                    render_dashboard(*active_index_ref, session, show_help)?;
+                }
                 KeyCode::Char(ch) => {
-                    let normalized = normalize_choice(&ch.to_string());
-                    if let Some(value) = normalized {
+                    if let Some(value) = normalize_choice(&ch.to_string()) {
                         execute!(io::stdout(), Clear(ClearType::All), MoveTo(0, 0))?;
                         return Ok(value.to_string());
                     }
-                }
-                KeyCode::Esc => {
-                    execute!(io::stdout(), Clear(ClearType::All), MoveTo(0, 0))?;
-                    return Ok("0".to_string());
                 }
                 _ => {}
             }
@@ -295,13 +450,16 @@ fn select_option_interactive(
     }
 }
 
-fn decode_lines(bytes: &[u8]) -> Vec<String> {
-    String::from_utf8_lossy(bytes)
-        .replace("\r\n", "\n")
-        .lines()
-        .map(|line| line.trim_end().to_string())
-        .filter(|line| !line.is_empty())
-        .collect()
+fn append_output(session: &mut SessionState, line: String) {
+    let trimmed = line.trim_end().to_string();
+    if trimmed.is_empty() {
+        return;
+    }
+    session.last_output_lines.push(trimmed);
+    if session.last_output_lines.len() > 120 {
+        session.last_output_lines =
+            session.last_output_lines[session.last_output_lines.len() - 120..].to_vec();
+    }
 }
 
 fn run_subcommand(
@@ -319,10 +477,44 @@ fn run_subcommand(
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
     let mut child = cmd.spawn()?;
+    session.last_output_lines.clear();
+
+    let (tx, rx) = mpsc::channel::<String>();
+    let mut handles = Vec::new();
+
+    if let Some(stdout) = child.stdout.take() {
+        let tx_out = tx.clone();
+        handles.push(thread::spawn(move || {
+            let reader = BufReader::new(stdout);
+            for line in reader.lines().map_while(Result::ok) {
+                let _ = tx_out.send(line);
+            }
+        }));
+    }
+
+    if let Some(stderr) = child.stderr.take() {
+        let tx_err = tx.clone();
+        handles.push(thread::spawn(move || {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines().map_while(Result::ok) {
+                let _ = tx_err.send(format!("[stderr] {line}"));
+            }
+        }));
+    }
+
+    drop(tx);
+
     let spinner_frames = ["|", "/", "-", "\\"];
     let mut spinner_index = 0usize;
 
     let status = loop {
+        while let Ok(line) = rx.try_recv() {
+            append_output(session, line);
+            if io::stdin().is_terminal() && io::stdout().is_terminal() {
+                render_dashboard(active_index, session, false)?;
+            }
+        }
+
         if let Some(status) = child.try_wait()? {
             break status;
         }
@@ -332,28 +524,20 @@ fn run_subcommand(
                 "running {}",
                 spinner_frames[spinner_index % spinner_frames.len()]
             ));
-            render_dashboard(active_index, session)?;
+            render_dashboard(active_index, session, false)?;
         }
 
         spinner_index += 1;
         thread::sleep(Duration::from_millis(90));
     };
 
-    let mut stdout_bytes = Vec::new();
-    let mut stderr_bytes = Vec::new();
-    if let Some(mut stdout) = child.stdout.take() {
-        stdout.read_to_end(&mut stdout_bytes)?;
-    }
-    if let Some(mut stderr) = child.stderr.take() {
-        stderr.read_to_end(&mut stderr_bytes)?;
+    for handle in handles {
+        let _ = handle.join();
     }
 
-    let mut lines = decode_lines(&stdout_bytes);
-    lines.extend(
-        decode_lines(&stderr_bytes)
-            .into_iter()
-            .map(|line| format!("[stderr] {line}")),
-    );
+    while let Ok(line) = rx.try_recv() {
+        append_output(session, line);
+    }
 
     session.last_status = if status.success() {
         Some("success".to_string())
@@ -362,12 +546,10 @@ fn run_subcommand(
             "failed (exit {})",
             status
                 .code()
-                .map(|c| c.to_string())
+                .map(|code| code.to_string())
                 .unwrap_or_else(|| "signal".to_string())
         ))
     };
-    session.last_output_lines = lines.into_iter().rev().take(120).collect::<Vec<_>>();
-    session.last_output_lines.reverse();
 
     Ok(())
 }
@@ -380,7 +562,7 @@ pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
         .unwrap_or(0);
 
     loop {
-        let choice = select_option_interactive(&session, &mut active_index)?;
+        let choice = select_option_interactive(&mut session, &mut active_index)?;
         let Some(choice) = normalize_choice(&choice) else {
             session.last_status = Some("invalid selection".to_string());
             continue;
@@ -503,7 +685,7 @@ pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_choice;
+    use super::{match_palette, normalize_choice};
 
     #[test]
     fn normalize_choice_supports_numeric_and_alias_inputs() {
@@ -516,5 +698,12 @@ mod tests {
     fn normalize_choice_rejects_invalid_values() {
         assert_eq!(normalize_choice(""), None);
         assert_eq!(normalize_choice("unknown"), None);
+    }
+
+    #[test]
+    fn palette_matches_expected_entries() {
+        assert_eq!(match_palette("trend"), Some(1));
+        assert_eq!(match_palette("profile"), Some(2));
+        assert_eq!(match_palette("zzz"), None);
     }
 }
