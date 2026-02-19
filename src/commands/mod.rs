@@ -18,6 +18,7 @@ pub mod search;
 pub mod stream;
 pub mod thread;
 pub mod trends;
+pub mod tui;
 pub mod tweet;
 pub mod watch;
 pub mod watchlist;

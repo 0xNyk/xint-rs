@@ -29,6 +29,7 @@ pub fn command_name(cmd: &Commands) -> &'static str {
         Commands::Tweet(_) => "tweet",
         Commands::Media(_) => "media",
         Commands::Article(_) => "article",
+        Commands::Tui(_) => "tui",
         Commands::Bookmarks(_) => "bookmarks",
         Commands::Bookmark(_) => "bookmark",
         Commands::Unbookmark(_) => "unbookmark",

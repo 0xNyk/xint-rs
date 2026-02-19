@@ -61,6 +61,10 @@ pub enum Commands {
     #[command(alias = "read")]
     Article(ArticleArgs),
 
+    /// Interactive menu for common read-only workflows
+    #[command(alias = "ui")]
+    Tui(TuiArgs),
+
     /// Fetch your bookmarked tweets (OAuth required)
     #[command(alias = "bm")]
     Bookmarks(BookmarksArgs),
@@ -453,6 +457,9 @@ pub struct ArticleArgs {
     #[arg(long, short = 'a')]
     pub ai: Option<String>,
 }
+
+#[derive(Parser)]
+pub struct TuiArgs {}
 
 // ---------------------------------------------------------------------------
 // Bookmarks

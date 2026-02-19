@@ -26,6 +26,7 @@ pub struct MCPTool {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 #[serde(tag = "type")]
 pub enum MCPMessage {
     #[serde(rename = "initialize")]
