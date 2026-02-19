@@ -1,7 +1,11 @@
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::process::Command;
 
 use anyhow::Result;
+use crossterm::cursor::MoveTo;
+use crossterm::event::{self, Event, KeyCode};
+use crossterm::execute;
+use crossterm::terminal::{self, Clear, ClearType};
 
 use crate::cli::{PolicyMode, TuiArgs};
 use crate::policy;
@@ -136,11 +140,97 @@ fn print_menu() {
     }
 }
 
+fn render_interactive_menu(active_index: usize) -> Result<()> {
+    let mut stdout = io::stdout();
+    execute!(stdout, Clear(ClearType::All), MoveTo(0, 0))?;
+    writeln!(stdout, "=== xint interactive ===")?;
+    writeln!(stdout, "Use Up/Down arrows and Enter. Press q to exit.\n")?;
+    for (index, option) in MENU_OPTIONS.iter().enumerate() {
+        let aliases = if option.aliases.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", option.aliases.join(", "))
+        };
+        if index == active_index {
+            writeln!(
+                stdout,
+                "\x1b[1;36m› {}) {}{}\x1b[0m",
+                option.key, option.label, aliases
+            )?;
+        } else {
+            writeln!(stdout, "  {}) {}{}", option.key, option.label, aliases)?;
+        }
+        writeln!(stdout, "    {}", option.hint)?;
+    }
+    stdout.flush()?;
+    Ok(())
+}
+
+fn select_option_interactive() -> Result<String> {
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        print_menu();
+        return prompt_line("\nSelect option (number or alias): ");
+    }
+
+    struct RawModeGuard;
+    impl Drop for RawModeGuard {
+        fn drop(&mut self) {
+            let _ = terminal::disable_raw_mode();
+        }
+    }
+
+    terminal::enable_raw_mode()?;
+    let _raw_mode_guard = RawModeGuard;
+    let mut active_index = MENU_OPTIONS
+        .iter()
+        .position(|option| option.key == "1")
+        .unwrap_or(0);
+    render_interactive_menu(active_index)?;
+
+    loop {
+        if let Event::Key(key_event) = event::read()? {
+            match key_event.code {
+                KeyCode::Up => {
+                    active_index = if active_index == 0 {
+                        MENU_OPTIONS.len() - 1
+                    } else {
+                        active_index - 1
+                    };
+                    render_interactive_menu(active_index)?;
+                }
+                KeyCode::Down => {
+                    active_index = (active_index + 1) % MENU_OPTIONS.len();
+                    render_interactive_menu(active_index)?;
+                }
+                KeyCode::Enter => {
+                    let selected = MENU_OPTIONS
+                        .get(active_index)
+                        .map(|option| option.key.to_string())
+                        .unwrap_or_else(|| "0".to_string());
+                    execute!(io::stdout(), Clear(ClearType::All), MoveTo(0, 0))?;
+                    return Ok(selected);
+                }
+                KeyCode::Char(ch) => {
+                    let normalized = normalize_choice(&ch.to_string());
+                    if let Some(value) = normalized {
+                        execute!(io::stdout(), Clear(ClearType::All), MoveTo(0, 0))?;
+                        return Ok(value.to_string());
+                    }
+                }
+                KeyCode::Esc => {
+                    execute!(io::stdout(), Clear(ClearType::All), MoveTo(0, 0))?;
+                    return Ok("0".to_string());
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
 pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
     let mut session = SessionState::default();
     loop {
-        print_menu();
-        let choice = prompt_line("\nSelect option (number or alias): ")?;
+        let choice = select_option_interactive()?;
         let Some(choice) = normalize_choice(&choice) else {
             eprintln!("[tui] Unknown option. Use a number (0-6) or alias like 'search' / 'help'.");
             continue;

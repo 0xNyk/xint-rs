@@ -32,6 +32,7 @@ anyhow = "1"
 thiserror = "2"
 url = "2"
 glob = "0.3"
+crossterm = "0.29"
 
 [profile.release]
 opt-level = "z"
