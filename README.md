@@ -99,6 +99,27 @@ X_CLIENT_ID=your_client_id
 xint auth setup
 ```
 
+## Deployment Modes
+
+### Self-hosted (OSS default)
+
+- Run this binary against your own local setup.
+- Package API features stay local unless cloud env vars are configured.
+- Best for development and private operator workflows.
+
+### Hosted cloud control plane (`xint-cloud`)
+
+- Point package API features to your hosted control plane:
+  - `XINT_PACKAGE_API_BASE_URL=http://localhost:8787/v1` (or your deployed URL)
+  - `XINT_PACKAGE_API_KEY=<workspace_api_key>`
+  - `XINT_WORKSPACE_ID=<workspace_id>`
+- Optional billing upgrade URL for quota/plan errors:
+  - `XINT_BILLING_UPGRADE_URL=https://your-app/pricing`
+
+Notes:
+- If `XINT_PACKAGE_API_BASE_URL` is unset, package API MCP tools return a setup error.
+- Keep `xint-cloud` private; `xint` and `xint-rs` remain public OSS clients.
+
 ## Agent-Native Capabilities Manifest
 
 `xint-rs` ships a machine-readable manifest for agent allowlists and runtime tool selection:
