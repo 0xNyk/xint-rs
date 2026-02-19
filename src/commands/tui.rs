@@ -26,6 +26,36 @@ struct SessionState {
     last_output_lines: Vec<String>,
 }
 
+#[derive(Copy, Clone)]
+enum DashboardTab {
+    Commands,
+    Output,
+    Help,
+}
+
+impl DashboardTab {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Commands => "Commands",
+            Self::Output => "Output",
+            Self::Help => "Help",
+        }
+    }
+
+    fn next(self) -> Self {
+        match self {
+            Self::Commands => Self::Output,
+            Self::Output => Self::Help,
+            Self::Help => Self::Commands,
+        }
+    }
+}
+
+struct UiState {
+    active_index: usize,
+    tab: DashboardTab,
+}
+
 struct MenuOption {
     key: &'static str,
     label: &'static str,
@@ -89,8 +119,10 @@ const HELP_LINES: &[&str] = &[
     "Hotkeys",
     "  Up/Down: Move selection",
     "  Enter: Run selected command",
+    "  Tab: Switch tabs",
+    "  F1/F2/F3: Commands/Output/Help",
     "  /: Command palette",
-    "  ?: Toggle help",
+    "  ?: Open Help tab",
     "  q or Esc: Exit",
 ];
 
@@ -249,12 +281,7 @@ fn pad_text(value: &str, width: usize) -> String {
 }
 
 fn build_left_lines(active_index: usize) -> Vec<String> {
-    let mut lines = vec![
-        "=== xint interactive ===".to_string(),
-        String::new(),
-        "Menu".to_string(),
-        String::new(),
-    ];
+    let mut lines = vec!["Menu".to_string(), String::new()];
 
     for (index, option) in MENU_OPTIONS.iter().enumerate() {
         let pointer = if index == active_index { ">" } else { " " };
@@ -273,78 +300,175 @@ fn build_left_lines(active_index: usize) -> Vec<String> {
     lines
 }
 
-fn build_right_lines(session: &SessionState, show_help: bool) -> Vec<String> {
-    if show_help {
-        let mut help = vec!["=== help ===".to_string()];
-        help.extend(HELP_LINES.iter().map(|line| line.to_string()));
-        return help;
+fn build_right_lines(session: &SessionState, tab: DashboardTab) -> Vec<String> {
+    match tab {
+        DashboardTab::Help => {
+            let mut help = vec!["Help".to_string(), String::new()];
+            help.extend(HELP_LINES.iter().map(|line| line.to_string()));
+            help
+        }
+        DashboardTab::Commands => vec![
+            "Commands".to_string(),
+            String::new(),
+            "Search  - deep topic reconnaissance".to_string(),
+            "Trends  - geo + global pulse".to_string(),
+            "Profile - account intelligence snapshot".to_string(),
+            "Thread  - conversation expansion".to_string(),
+            "Article - fetch + parse linked content".to_string(),
+            String::new(),
+            "Tips".to_string(),
+            "- Press / for fast palette".to_string(),
+            "- Press Enter to execute".to_string(),
+            "- Switch tab for Output/Help".to_string(),
+        ],
+        DashboardTab::Output => {
+            let mut lines = vec!["Last run".to_string(), String::new()];
+            lines.push(format!(
+                "command: {}",
+                session.last_command.as_deref().unwrap_or("-")
+            ));
+            lines.push(format!(
+                "status: {}",
+                session.last_status.as_deref().unwrap_or("-")
+            ));
+            lines.push(String::new());
+            lines.push("output:".to_string());
+
+            if session.last_output_lines.is_empty() {
+                lines.push("(none yet)".to_string());
+            } else {
+                lines.extend(session.last_output_lines.iter().cloned());
+            }
+
+            lines
+        }
     }
-
-    let mut lines = vec![
-        "=== last run ===".to_string(),
-        format!(
-            "command: {}",
-            session.last_command.as_deref().unwrap_or("-")
-        ),
-        format!("status: {}", session.last_status.as_deref().unwrap_or("-")),
-        String::new(),
-        "output:".to_string(),
-    ];
-
-    if session.last_output_lines.is_empty() {
-        lines.push("(none yet)".to_string());
-    } else {
-        lines.extend(session.last_output_lines.iter().cloned());
-    }
-
-    lines
 }
 
-fn render_dashboard(active_index: usize, session: &SessionState, show_help: bool) -> Result<()> {
+fn render_dashboard(ui_state: &UiState, session: &SessionState) -> Result<()> {
     let theme = active_theme();
     let (cols, rows) = terminal::size().unwrap_or((120, 32));
-    let total_rows = max(14usize, rows.saturating_sub(2) as usize);
-    let left_width = max(42usize, (cols as usize * 45) / 100);
-    let right_width = max(24usize, cols as usize - left_width - 3);
+    let total_rows = max(12usize, rows.saturating_sub(7) as usize);
+    let left_box_width = max(46usize, (cols as usize * 45) / 100);
+    let right_box_width = max(30usize, cols as usize - left_box_width - 1);
+    let left_inner = max(20usize, left_box_width - 2);
+    let right_inner = max(20usize, right_box_width - 2);
 
-    let left_lines = build_left_lines(active_index);
-    let mut right_lines = build_right_lines(session, show_help);
+    let left_lines = build_left_lines(ui_state.active_index);
+    let mut right_lines = build_right_lines(session, ui_state.tab);
     if right_lines.len() > total_rows {
         right_lines = right_lines[right_lines.len() - total_rows..].to_vec();
     }
 
+    let tabs = [
+        DashboardTab::Commands,
+        DashboardTab::Output,
+        DashboardTab::Help,
+    ]
+    .iter()
+    .enumerate()
+    .map(|(index, tab)| {
+        let label = format!("{}:{}", index + 1, tab.label());
+        if matches!(
+            (tab, ui_state.tab),
+            (DashboardTab::Commands, DashboardTab::Commands)
+                | (DashboardTab::Output, DashboardTab::Output)
+                | (DashboardTab::Help, DashboardTab::Help)
+        ) {
+            format!("{}[ {} ]{}", theme.accent, label, theme.reset)
+        } else {
+            format!("[ {} ]", label)
+        }
+    })
+    .collect::<Vec<_>>()
+    .join(" ");
+
     let mut stdout = io::stdout();
     execute!(stdout, Clear(ClearType::All), MoveTo(0, 0))?;
+
+    writeln!(
+        stdout,
+        "{}+{}+{}",
+        theme.border,
+        "-".repeat((cols as usize).saturating_sub(2)),
+        theme.reset
+    )?;
+    writeln!(
+        stdout,
+        "{}|{}{}{}|{}",
+        theme.border,
+        theme.reset,
+        pad_text(
+            &format!(" xint dashboard {}", tabs),
+            (cols as usize).saturating_sub(2)
+        ),
+        theme.border,
+        theme.reset
+    )?;
+    writeln!(
+        stdout,
+        "{}+{}+ +{}+{}",
+        theme.border,
+        "-".repeat(left_box_width.saturating_sub(2)),
+        "-".repeat(right_box_width.saturating_sub(2)),
+        theme.reset
+    )?;
 
     for row in 0..total_rows {
         let left_raw = left_lines.get(row).map(String::as_str).unwrap_or("");
         let right_raw = right_lines.get(row).map(String::as_str).unwrap_or("");
-        let left = pad_text(left_raw, left_width);
-        let right = pad_text(right_raw, right_width);
+        let left = pad_text(left_raw, left_inner);
+        let right = pad_text(right_raw, right_inner);
 
-        if left_raw.starts_with("> ") {
-            writeln!(
-                stdout,
-                "{}{}{} | {}",
-                theme.accent, left, theme.reset, right
-            )?;
+        let left_segment = if left_raw.starts_with("> ") {
+            format!("{}{}{}", theme.accent, left, theme.reset)
         } else {
-            writeln!(
-                stdout,
-                "{}{}{}{} | {}{}{}",
-                theme.muted, left, theme.reset, theme.border, theme.muted, right, theme.reset,
-            )?;
-        }
+            format!("{}{}{}", theme.muted, left, theme.reset)
+        };
+
+        writeln!(
+            stdout,
+            "{}|{}{}{}|{} {}|{}{}{}|{}",
+            theme.border,
+            theme.reset,
+            left_segment,
+            theme.border,
+            theme.reset,
+            theme.border,
+            theme.muted,
+            right,
+            theme.border,
+            theme.reset
+        )?;
     }
 
-    let footer = " ↑↓ Navigate | Enter Run | / Palette | ? Help | q Quit ";
     writeln!(
         stdout,
-        "{}{}{}",
+        "{}+{}+ +{}+{}",
         theme.border,
-        pad_text(footer, cols as usize),
+        "-".repeat(left_box_width.saturating_sub(2)),
+        "-".repeat(right_box_width.saturating_sub(2)),
         theme.reset
     )?;
+
+    let footer = " Up/Down Navigate | Enter Run | Tab Tabs | / Palette | ? Help | q Quit ";
+    writeln!(
+        stdout,
+        "{}|{}{}{}|{}",
+        theme.border,
+        theme.reset,
+        pad_text(footer, (cols as usize).saturating_sub(2)),
+        theme.border,
+        theme.reset
+    )?;
+    writeln!(
+        stdout,
+        "{}+{}+{}",
+        theme.border,
+        "-".repeat((cols as usize).saturating_sub(2)),
+        theme.reset
+    )?;
+
     stdout.flush()?;
     Ok(())
 }
@@ -362,10 +486,7 @@ fn print_menu() {
     }
 }
 
-fn select_option_interactive(
-    session: &mut SessionState,
-    active_index_ref: &mut usize,
-) -> Result<String> {
+fn select_option_interactive(session: &mut SessionState, ui_state: &mut UiState) -> Result<String> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         print_menu();
         return prompt_line("\nSelect option (number or alias): ");
@@ -380,28 +501,42 @@ fn select_option_interactive(
 
     terminal::enable_raw_mode()?;
     let _raw_mode_guard = RawModeGuard;
-    let mut show_help = false;
-
-    render_dashboard(*active_index_ref, session, show_help)?;
+    render_dashboard(ui_state, session)?;
 
     loop {
         if let Event::Key(key_event) = event::read()? {
             match key_event.code {
                 KeyCode::Up => {
-                    *active_index_ref = if *active_index_ref == 0 {
+                    ui_state.active_index = if ui_state.active_index == 0 {
                         MENU_OPTIONS.len() - 1
                     } else {
-                        *active_index_ref - 1
+                        ui_state.active_index - 1
                     };
-                    render_dashboard(*active_index_ref, session, show_help)?;
+                    render_dashboard(ui_state, session)?;
                 }
                 KeyCode::Down => {
-                    *active_index_ref = (*active_index_ref + 1) % MENU_OPTIONS.len();
-                    render_dashboard(*active_index_ref, session, show_help)?;
+                    ui_state.active_index = (ui_state.active_index + 1) % MENU_OPTIONS.len();
+                    render_dashboard(ui_state, session)?;
+                }
+                KeyCode::Tab => {
+                    ui_state.tab = ui_state.tab.next();
+                    render_dashboard(ui_state, session)?;
+                }
+                KeyCode::F(1) => {
+                    ui_state.tab = DashboardTab::Commands;
+                    render_dashboard(ui_state, session)?;
+                }
+                KeyCode::F(2) => {
+                    ui_state.tab = DashboardTab::Output;
+                    render_dashboard(ui_state, session)?;
+                }
+                KeyCode::F(3) => {
+                    ui_state.tab = DashboardTab::Help;
+                    render_dashboard(ui_state, session)?;
                 }
                 KeyCode::Enter => {
                     let selected = MENU_OPTIONS
-                        .get(*active_index_ref)
+                        .get(ui_state.active_index)
                         .map(|option| option.key.to_string())
                         .unwrap_or_else(|| "0".to_string());
                     execute!(io::stdout(), Clear(ClearType::All), MoveTo(0, 0))?;
@@ -412,17 +547,17 @@ fn select_option_interactive(
                     return Ok("0".to_string());
                 }
                 KeyCode::Char('?') => {
-                    show_help = !show_help;
-                    render_dashboard(*active_index_ref, session, show_help)?;
+                    ui_state.tab = DashboardTab::Help;
+                    render_dashboard(ui_state, session)?;
                 }
                 KeyCode::Char('/') => {
                     terminal::disable_raw_mode()?;
                     let query = prompt_line("\nPalette (/): ")?;
                     terminal::enable_raw_mode()?;
                     if let Some(index) = match_palette(&query) {
-                        *active_index_ref = index;
+                        ui_state.active_index = index;
                         let selected = MENU_OPTIONS
-                            .get(*active_index_ref)
+                            .get(ui_state.active_index)
                             .map(|option| option.key.to_string())
                             .unwrap_or_else(|| "0".to_string());
                         execute!(io::stdout(), Clear(ClearType::All), MoveTo(0, 0))?;
@@ -436,7 +571,7 @@ fn select_option_interactive(
                             query.trim()
                         }
                     ));
-                    render_dashboard(*active_index_ref, session, show_help)?;
+                    render_dashboard(ui_state, session)?;
                 }
                 KeyCode::Char(ch) => {
                     if let Some(value) = normalize_choice(&ch.to_string()) {
@@ -466,7 +601,7 @@ fn run_subcommand(
     args: &[String],
     policy_mode: PolicyMode,
     session: &mut SessionState,
-    active_index: usize,
+    ui_state: &UiState,
 ) -> Result<()> {
     let exe = std::env::current_exe()?;
     let mut cmd = Command::new(exe);
@@ -511,7 +646,7 @@ fn run_subcommand(
         while let Ok(line) = rx.try_recv() {
             append_output(session, line);
             if io::stdin().is_terminal() && io::stdout().is_terminal() {
-                render_dashboard(active_index, session, false)?;
+                render_dashboard(ui_state, session)?;
             }
         }
 
@@ -524,7 +659,7 @@ fn run_subcommand(
                 "running {}",
                 spinner_frames[spinner_index % spinner_frames.len()]
             ));
-            render_dashboard(active_index, session, false)?;
+            render_dashboard(ui_state, session)?;
         }
 
         spinner_index += 1;
@@ -556,13 +691,17 @@ fn run_subcommand(
 
 pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
     let mut session = SessionState::default();
-    let mut active_index = MENU_OPTIONS
+    let initial_index = MENU_OPTIONS
         .iter()
         .position(|option| option.key == "1")
         .unwrap_or(0);
+    let mut ui_state = UiState {
+        active_index: initial_index,
+        tab: DashboardTab::Output,
+    };
 
     loop {
-        let choice = select_option_interactive(&mut session, &mut active_index)?;
+        let choice = select_option_interactive(&mut session, &mut ui_state)?;
         let Some(choice) = normalize_choice(&choice) else {
             session.last_status = Some("invalid selection".to_string());
             continue;
@@ -585,7 +724,7 @@ pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
                     &["search".to_string(), query],
                     policy_mode,
                     &mut session,
-                    active_index,
+                    &ui_state,
                 )?;
             }
             "2" => {
@@ -604,14 +743,14 @@ pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
                         &["trends".to_string()],
                         policy_mode,
                         &mut session,
-                        active_index,
+                        &ui_state,
                     )?;
                 } else {
                     run_subcommand(
                         &["trends".to_string(), location],
                         policy_mode,
                         &mut session,
-                        active_index,
+                        &ui_state,
                     )?;
                 }
             }
@@ -630,7 +769,7 @@ pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
                     &["profile".to_string(), username],
                     policy_mode,
                     &mut session,
-                    active_index,
+                    &ui_state,
                 )?;
             }
             "4" => {
@@ -646,7 +785,7 @@ pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
                     &["thread".to_string(), tweet_ref],
                     policy_mode,
                     &mut session,
-                    active_index,
+                    &ui_state,
                 )?;
             }
             "5" => {
@@ -664,7 +803,7 @@ pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
                     &["article".to_string(), url],
                     policy_mode,
                     &mut session,
-                    active_index,
+                    &ui_state,
                 )?;
             }
             "6" => {
@@ -673,7 +812,7 @@ pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
                     &["--help".to_string()],
                     policy_mode,
                     &mut session,
-                    active_index,
+                    &ui_state,
                 )?;
             }
             _ => {}
