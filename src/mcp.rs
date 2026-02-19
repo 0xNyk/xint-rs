@@ -493,7 +493,7 @@ impl MCPServer {
         body: Option<serde_json::Value>,
     ) -> Result<serde_json::Value, String> {
         let base = Self::package_api_base_url().ok_or_else(|| {
-            "XINT_PACKAGE_API_BASE_URL not set. Start local API with `xint package-api-server --port=8080` and set XINT_PACKAGE_API_BASE_URL=http://localhost:8080/v1".to_string()
+            "XINT_PACKAGE_API_BASE_URL not set. Start xint-cloud service on :8787 and set XINT_PACKAGE_API_BASE_URL=http://localhost:8787/v1".to_string()
         })?;
         let url = format!("{}{}", base.trim_end_matches('/'), path);
 
