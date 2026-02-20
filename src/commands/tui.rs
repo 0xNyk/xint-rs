@@ -356,6 +356,16 @@ fn sanitize_output_line(raw: &str) -> String {
 fn build_menu_lines(active_index: usize) -> Vec<String> {
     let mut lines = vec!["Menu".to_string(), String::new()];
 
+    let icon_for_action = |key: &str| match key {
+        "1" => "⌕ ",
+        "2" => "◍ ",
+        "3" => "◉ ",
+        "4" => "↳ ",
+        "5" => "✦ ",
+        "6" => "? ",
+        _ => "",
+    };
+
     for (index, option) in INTERACTIVE_ACTIONS.iter().enumerate() {
         let pointer = if index == active_index { ">" } else { " " };
         let aliases = if option.aliases.is_empty() {
@@ -364,8 +374,10 @@ fn build_menu_lines(active_index: usize) -> Vec<String> {
             format!(" ({})", option.aliases.join(", "))
         };
         lines.push(format!(
-            "{pointer} {}) {}{aliases}",
-            option.key, option.label
+            "{pointer} {}) {}{}{aliases}",
+            option.key,
+            icon_for_action(option.key),
+            option.label
         ));
         lines.push(format!("    {}", option.hint));
     }
@@ -586,7 +598,7 @@ fn render_double_pane(
         "{}|{}{}{}{}|{}",
         theme.border,
         theme.reset,
-        theme.muted,
+        theme.accent,
         pad_text(&format!(" {tracker}"), cols.saturating_sub(2)),
         theme.reset,
         theme.border
@@ -715,7 +727,7 @@ fn render_single_pane(
         "{}|{}{}{}{}|{}",
         theme.border,
         theme.reset,
-        theme.muted,
+        theme.accent,
         pad_text(&format!(" {tracker}"), width),
         theme.reset,
         theme.border
