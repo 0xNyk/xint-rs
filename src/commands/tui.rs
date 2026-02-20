@@ -277,6 +277,82 @@ fn pad_text(value: &str, width: usize) -> String {
     }
 }
 
+fn build_tabs(ui_state: &UiState) -> String {
+    [
+        DashboardTab::Commands,
+        DashboardTab::Output,
+        DashboardTab::Help,
+    ]
+    .iter()
+    .enumerate()
+    .map(|(index, tab)| {
+        let label = format!("{}:{}", index + 1, tab.label());
+        if matches!(
+            (tab, ui_state.tab),
+            (DashboardTab::Commands, DashboardTab::Commands)
+                | (DashboardTab::Output, DashboardTab::Output)
+                | (DashboardTab::Help, DashboardTab::Help)
+        ) {
+            format!("‹{label}›")
+        } else {
+            format!("[{label}]")
+        }
+    })
+    .collect::<Vec<_>>()
+    .join(" ")
+}
+
+fn build_header_tracker(ui_state: &UiState, width: usize) -> String {
+    let rail_width = width.clamp(8, 18);
+    let cursor_basis = if ui_state.inline_prompt_label.is_some() {
+        ui_state.inline_prompt_value.chars().count()
+    } else {
+        ui_state.active_index.saturating_mul(4) + ui_state.output_offset
+    };
+    let pos = cursor_basis % rail_width;
+    let left = "·".repeat(pos);
+    let right = "·".repeat(rail_width.saturating_sub(pos + 1));
+    format!("focus {left}●{right}")
+}
+
+#[allow(clippy::while_let_on_iterator)]
+fn sanitize_output_line(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut chars = raw.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' {
+            if let Some('[') = chars.peek().copied() {
+                let _ = chars.next();
+                while let Some(next) = chars.next() {
+                    if ('@'..='~').contains(&next) {
+                        break;
+                    }
+                }
+                continue;
+            }
+            if let Some(']') = chars.peek().copied() {
+                let _ = chars.next();
+                while let Some(next) = chars.next() {
+                    if next == '\u{07}' {
+                        break;
+                    }
+                    if next == '\u{1b}' && chars.peek().copied() == Some('\\') {
+                        let _ = chars.next();
+                        break;
+                    }
+                }
+                continue;
+            }
+            continue;
+        }
+
+        if ch == '\n' || ch == '\t' || !ch.is_control() {
+            out.push(ch);
+        }
+    }
+    out
+}
+
 fn build_menu_lines(active_index: usize) -> Vec<String> {
     let mut lines = vec!["Menu".to_string(), String::new()];
 
@@ -471,7 +547,7 @@ fn render_double_pane(
     rows: usize,
 ) -> Result<()> {
     let theme = active_theme();
-    let total_rows = max(12usize, rows.saturating_sub(8));
+    let total_rows = max(12usize, rows.saturating_sub(9));
     let left_box_width = max(46usize, (cols * 45) / 100);
     let right_box_width = max(30usize, cols.saturating_sub(left_box_width + 1));
     let left_inner = max(20usize, left_box_width.saturating_sub(2));
@@ -483,28 +559,8 @@ fn render_double_pane(
         right_lines = right_lines[right_lines.len() - total_rows..].to_vec();
     }
 
-    let tabs = [
-        DashboardTab::Commands,
-        DashboardTab::Output,
-        DashboardTab::Help,
-    ]
-    .iter()
-    .enumerate()
-    .map(|(index, tab)| {
-        let label = format!("{}:{}", index + 1, tab.label());
-        if matches!(
-            (tab, ui_state.tab),
-            (DashboardTab::Commands, DashboardTab::Commands)
-                | (DashboardTab::Output, DashboardTab::Output)
-                | (DashboardTab::Help, DashboardTab::Help)
-        ) {
-            format!("{}[ {} ]{}", theme.accent, label, theme.reset)
-        } else {
-            format!("[ {} ]", label)
-        }
-    })
-    .collect::<Vec<_>>()
-    .join(" ");
+    let tabs = build_tabs(ui_state);
+    let tracker = build_header_tracker(ui_state, 16);
 
     let mut stdout = io::stdout();
     execute!(stdout, Clear(ClearType::All), MoveTo(0, 0))?;
@@ -524,6 +580,16 @@ fn render_double_pane(
         pad_text(&format!(" xint dashboard {}", tabs), cols.saturating_sub(2)),
         theme.border,
         theme.reset
+    )?;
+    writeln!(
+        stdout,
+        "{}|{}{}{}{}|{}",
+        theme.border,
+        theme.reset,
+        theme.muted,
+        pad_text(&format!(" {tracker}"), cols.saturating_sub(2)),
+        theme.reset,
+        theme.border
     )?;
     writeln!(
         stdout,
@@ -580,7 +646,8 @@ fn render_double_pane(
         theme.border
     )?;
 
-    let footer = " Up/Down Navigate | Enter Run | Tab Tabs | F Search Output | PgUp/PgDn Scroll | / Palette | q Quit ";
+    let footer =
+        " ↑↓ Move • Enter Run • Tab Views • f Filter • / Palette • PgUp/PgDn Scroll • q Quit ";
     writeln!(
         stdout,
         "{}|{}{}{}|{}",
@@ -610,30 +677,10 @@ fn render_single_pane(
 ) -> Result<()> {
     let theme = active_theme();
     let width = max(30usize, cols.saturating_sub(2));
-    let total_rows = max(10usize, rows.saturating_sub(7));
+    let total_rows = max(10usize, rows.saturating_sub(8));
 
-    let tabs = [
-        DashboardTab::Commands,
-        DashboardTab::Output,
-        DashboardTab::Help,
-    ]
-    .iter()
-    .enumerate()
-    .map(|(index, tab)| {
-        let label = format!("{}:{}", index + 1, tab.label());
-        if matches!(
-            (tab, ui_state.tab),
-            (DashboardTab::Commands, DashboardTab::Commands)
-                | (DashboardTab::Output, DashboardTab::Output)
-                | (DashboardTab::Help, DashboardTab::Help)
-        ) {
-            format!("{}[ {} ]{}", theme.accent, label, theme.reset)
-        } else {
-            format!("[ {} ]", label)
-        }
-    })
-    .collect::<Vec<_>>()
-    .join(" ");
+    let tabs = build_tabs(ui_state);
+    let tracker = build_header_tracker(ui_state, 16);
 
     let lines = if matches!(ui_state.tab, DashboardTab::Commands) {
         let mut merged = build_menu_lines(ui_state.active_index);
@@ -662,6 +709,16 @@ fn render_single_pane(
         pad_text(&format!(" xint dashboard {}", tabs), width),
         theme.border,
         theme.reset
+    )?;
+    writeln!(
+        stdout,
+        "{}|{}{}{}{}|{}",
+        theme.border,
+        theme.reset,
+        theme.muted,
+        pad_text(&format!(" {tracker}"), width),
+        theme.reset,
+        theme.border
     )?;
     writeln!(
         stdout,
@@ -724,7 +781,7 @@ fn render_single_pane(
         theme.reset,
         theme.border
     )?;
-    let footer = " Tab Tabs | F Search Output | PgUp/PgDn Scroll | / Palette | q Quit ";
+    let footer = " Enter Run • Tab Views • f Filter • / Palette • PgUp/PgDn • q Quit ";
     writeln!(
         stdout,
         "{}|{}{}{}|{}",
@@ -849,7 +906,7 @@ fn select_option_interactive(session: &mut SessionState, ui_state: &mut UiState)
 }
 
 fn append_output(session: &mut SessionState, line: String) {
-    let trimmed = line.trim_end().to_string();
+    let trimmed = sanitize_output_line(&line).trim_end().to_string();
     if trimmed.is_empty() {
         return;
     }
