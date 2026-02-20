@@ -6,6 +6,14 @@ pub struct TuiExecutionPlan {
     pub args: Vec<String>,
 }
 
+fn normalize_search_query(value: &str) -> String {
+    value
+        .split_whitespace()
+        .map(|token| if token == "&" { "AND" } else { token })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 pub fn build_tui_execution_plan(
     action_key: &str,
     value: Option<&str>,
@@ -17,11 +25,12 @@ pub fn build_tui_execution_plan(
             if normalized.is_empty() {
                 return action_error("Query is required.");
             }
+            let search_query = normalize_search_query(normalized);
             action_success(
                 "Search plan ready.",
                 Some(TuiExecutionPlan {
-                    command: format!("xint search {normalized}"),
-                    args: vec!["search".to_string(), normalized.to_string()],
+                    command: format!("xint search {search_query}"),
+                    args: vec!["search".to_string(), search_query],
                 }),
             )
         }
@@ -104,6 +113,18 @@ mod tests {
         assert_eq!(
             plan.args,
             vec!["search".to_string(), "ai agents".to_string()]
+        );
+    }
+
+    #[test]
+    fn normalizes_ampersand_in_search_query() {
+        let result = build_tui_execution_plan("1", Some("ai & solana"));
+        assert_eq!(result.message, "Search plan ready.");
+        let plan = result.data.expect("plan");
+        assert_eq!(plan.command, "xint search ai AND solana");
+        assert_eq!(
+            plan.args,
+            vec!["search".to_string(), "ai AND solana".to_string()]
         );
     }
 
