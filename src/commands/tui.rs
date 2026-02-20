@@ -6,10 +6,10 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
-use crossterm::cursor::MoveTo;
+use crossterm::cursor::{Hide, MoveTo, Show};
 use crossterm::event::{self, Event, KeyCode};
 use crossterm::execute;
-use crossterm::terminal::{self, Clear, ClearType};
+use crossterm::terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen};
 
 use crate::cli::{PolicyMode, TuiArgs};
 use crate::commands::actions::{
@@ -78,6 +78,41 @@ struct Theme {
     border: &'static str,
     muted: &'static str,
     reset: &'static str,
+}
+
+struct TerminalUiGuard {
+    active: bool,
+}
+
+impl TerminalUiGuard {
+    fn enter_if_tty() -> Result<Self> {
+        if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+            return Ok(Self { active: false });
+        }
+
+        terminal::enable_raw_mode()?;
+        let mut stdout = io::stdout();
+        execute!(
+            stdout,
+            EnterAlternateScreen,
+            Hide,
+            Clear(ClearType::All),
+            MoveTo(0, 0)
+        )?;
+        Ok(Self { active: true })
+    }
+}
+
+impl Drop for TerminalUiGuard {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+
+        let mut stdout = io::stdout();
+        let _ = execute!(stdout, Show, LeaveAlternateScreen);
+        let _ = terminal::disable_raw_mode();
+    }
 }
 
 const HELP_LINES: &[&str] = &[
@@ -149,16 +184,6 @@ fn prompt_with_default_dashboard(
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return prompt_with_default(label, previous);
     }
-
-    struct RawModeGuard;
-    impl Drop for RawModeGuard {
-        fn drop(&mut self) {
-            let _ = terminal::disable_raw_mode();
-        }
-    }
-
-    terminal::enable_raw_mode()?;
-    let _raw_mode_guard = RawModeGuard;
 
     ui_state.tab = DashboardTab::Output;
     ui_state.inline_prompt_label = Some(label.to_string());
@@ -748,16 +773,6 @@ fn select_option_interactive(session: &mut SessionState, ui_state: &mut UiState)
         print_menu();
         return prompt_line("\nSelect option (number or alias): ");
     }
-
-    struct RawModeGuard;
-    impl Drop for RawModeGuard {
-        fn drop(&mut self) {
-            let _ = terminal::disable_raw_mode();
-        }
-    }
-
-    terminal::enable_raw_mode()?;
-    let _raw_mode_guard = RawModeGuard;
     render_dashboard(ui_state, session)?;
 
     loop {
@@ -796,7 +811,6 @@ fn select_option_interactive(session: &mut SessionState, ui_state: &mut UiState)
                     return Ok(selected);
                 }
                 KeyCode::Char('q') | KeyCode::Esc => {
-                    execute!(io::stdout(), Clear(ClearType::All), MoveTo(0, 0))?;
                     return Ok("0".to_string());
                 }
                 KeyCode::Char('?') => {
@@ -940,6 +954,8 @@ fn run_subcommand(
 }
 
 pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
+    let _terminal_guard = TerminalUiGuard::enter_if_tty()?;
+
     let mut session = SessionState::default();
     let initial_index = INTERACTIVE_ACTIONS
         .iter()
@@ -1003,7 +1019,6 @@ pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
 
         match choice {
             "0" => {
-                println!("Exiting xint interactive mode.");
                 break;
             }
             "1" => {
