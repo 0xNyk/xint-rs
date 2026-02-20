@@ -1,4 +1,5 @@
 use std::cmp::max;
+use std::fs;
 use std::io::{self, BufRead, BufReader, IsTerminal, Write};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -10,6 +11,7 @@ use crossterm::cursor::{Hide, MoveTo, Show};
 use crossterm::event::{self, Event, KeyCode};
 use crossterm::execute;
 use crossterm::terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen};
+use serde_json::Value;
 
 use crate::cli::{PolicyMode, TuiArgs};
 use crate::commands::actions::{
@@ -74,10 +76,11 @@ struct UiState {
 }
 
 struct Theme {
-    accent: &'static str,
-    border: &'static str,
-    muted: &'static str,
-    reset: &'static str,
+    accent: String,
+    border: String,
+    muted: String,
+    hero: String,
+    reset: String,
 }
 
 struct TerminalUiGuard {
@@ -128,30 +131,75 @@ const HELP_LINES: &[&str] = &[
 ];
 
 fn active_theme() -> Theme {
-    match std::env::var("XINT_TUI_THEME")
+    let mut theme = match std::env::var("XINT_TUI_THEME")
         .unwrap_or_else(|_| "classic".to_string())
         .to_lowercase()
         .as_str()
     {
         "minimal" => Theme {
-            accent: "\x1b[1m",
-            border: "",
-            muted: "",
-            reset: "\x1b[0m",
+            accent: "\x1b[1m".to_string(),
+            border: "".to_string(),
+            muted: "".to_string(),
+            hero: "\x1b[1m".to_string(),
+            reset: "\x1b[0m".to_string(),
+        },
+        "ocean" => Theme {
+            accent: "\x1b[1;96m".to_string(),
+            border: "\x1b[38;5;39m".to_string(),
+            muted: "\x1b[38;5;244m".to_string(),
+            hero: "\x1b[1;94m".to_string(),
+            reset: "\x1b[0m".to_string(),
+        },
+        "amber" => Theme {
+            accent: "\x1b[1;33m".to_string(),
+            border: "\x1b[38;5;214m".to_string(),
+            muted: "\x1b[38;5;244m".to_string(),
+            hero: "\x1b[1;33m".to_string(),
+            reset: "\x1b[0m".to_string(),
         },
         "neon" => Theme {
-            accent: "\x1b[1;95m",
-            border: "\x1b[38;5;45m",
-            muted: "\x1b[38;5;244m",
-            reset: "\x1b[0m",
+            accent: "\x1b[1;95m".to_string(),
+            border: "\x1b[38;5;45m".to_string(),
+            muted: "\x1b[38;5;244m".to_string(),
+            hero: "\x1b[1;92m".to_string(),
+            reset: "\x1b[0m".to_string(),
         },
         _ => Theme {
-            accent: "\x1b[1;36m",
-            border: "\x1b[2m",
-            muted: "\x1b[2m",
-            reset: "\x1b[0m",
+            accent: "\x1b[1;36m".to_string(),
+            border: "\x1b[2m".to_string(),
+            muted: "\x1b[2m".to_string(),
+            hero: "\x1b[1;34m".to_string(),
+            reset: "\x1b[0m".to_string(),
         },
+    };
+
+    if let Ok(path) = std::env::var("XINT_TUI_THEME_FILE") {
+        if let Ok(raw) = fs::read_to_string(path) {
+            if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(&raw) {
+                if let Some(Value::String(v)) = map.get("accent") {
+                    theme.accent = v.clone();
+                }
+                if let Some(Value::String(v)) = map.get("border") {
+                    theme.border = v.clone();
+                }
+                if let Some(Value::String(v)) = map.get("muted") {
+                    theme.muted = v.clone();
+                }
+                if let Some(Value::String(v)) = map.get("hero") {
+                    theme.hero = v.clone();
+                }
+                if let Some(Value::String(v)) = map.get("reset") {
+                    theme.reset = v.clone();
+                }
+            }
+        }
     }
+
+    theme
+}
+
+fn is_hero_enabled() -> bool {
+    std::env::var("XINT_TUI_HERO").as_deref() != Ok("0")
 }
 
 fn prompt_line(label: &str) -> Result<String> {
@@ -317,6 +365,27 @@ fn build_header_tracker(ui_state: &UiState, width: usize) -> String {
     let left = "·".repeat(pos);
     let right = "·".repeat(rail_width.saturating_sub(pos + 1));
     format!("focus {left}●{right}")
+}
+
+fn build_hero_line(ui_state: &UiState, session: &SessionState, width: usize) -> String {
+    let phase = resolve_ui_phase(session, ui_state);
+    let running_palette = ["▁", "▂", "▃", "▄", "▅", "▆", "▇"];
+    let idle_palette = ["·", "•", "·", "•", "·"];
+    let palette = if matches!(phase, UiPhase::Running) {
+        &running_palette[..]
+    } else {
+        &idle_palette[..]
+    };
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as usize)
+        .unwrap_or(0);
+    let tick = millis / 110;
+    let wave = (0..12)
+        .map(|i| palette[(tick + i) % palette.len()])
+        .collect::<Vec<_>>()
+        .join("");
+    pad_text(&format!(" xint intelligence console  {wave}"), width)
 }
 
 #[allow(clippy::while_let_on_iterator)]
@@ -563,7 +632,10 @@ fn render_double_pane(
     rows: usize,
 ) -> Result<()> {
     let theme = active_theme();
-    let total_rows = max(12usize, rows.saturating_sub(9));
+    let total_rows = max(
+        12usize,
+        rows.saturating_sub(if is_hero_enabled() { 10 } else { 9 }),
+    );
     let left_box_width = max(46usize, (cols * 45) / 100);
     let right_box_width = max(30usize, cols.saturating_sub(left_box_width + 1));
     let left_inner = max(20usize, left_box_width.saturating_sub(2));
@@ -588,6 +660,18 @@ fn render_double_pane(
         "-".repeat(cols.saturating_sub(2)),
         theme.reset
     )?;
+    if is_hero_enabled() {
+        writeln!(
+            stdout,
+            "{}|{}{}{}{}|{}",
+            theme.border,
+            theme.reset,
+            theme.hero,
+            build_hero_line(ui_state, session, cols.saturating_sub(2)),
+            theme.reset,
+            theme.border
+        )?;
+    }
     writeln!(
         stdout,
         "{}|{}{}{}|{}",
@@ -693,7 +777,10 @@ fn render_single_pane(
 ) -> Result<()> {
     let theme = active_theme();
     let width = max(30usize, cols.saturating_sub(2));
-    let total_rows = max(10usize, rows.saturating_sub(8));
+    let total_rows = max(
+        10usize,
+        rows.saturating_sub(if is_hero_enabled() { 9 } else { 8 }),
+    );
 
     let tabs = build_tabs(ui_state);
     let tracker = build_header_tracker(ui_state, 16);
@@ -717,6 +804,18 @@ fn render_single_pane(
         "-".repeat(width),
         theme.reset
     )?;
+    if is_hero_enabled() {
+        writeln!(
+            stdout,
+            "{}|{}{}{}{}|{}",
+            theme.border,
+            theme.reset,
+            theme.hero,
+            build_hero_line(ui_state, session, width),
+            theme.reset,
+            theme.border
+        )?;
+    }
     writeln!(
         stdout,
         "{}|{}{}{}|{}",
