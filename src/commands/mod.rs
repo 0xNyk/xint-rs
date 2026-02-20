@@ -1,3 +1,4 @@
+pub mod actions;
 pub mod analyze;
 pub mod article;
 pub mod auth_cmd;
@@ -19,6 +20,7 @@ pub mod stream;
 pub mod thread;
 pub mod trends;
 pub mod tui;
+pub mod tui_adapter;
 pub mod tweet;
 pub mod watch;
 pub mod watchlist;

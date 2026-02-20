@@ -1,4 +1,5 @@
 use anyhow::{bail, Result};
+use rand::RngCore;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::{self, BufRead, Write as IoWrite};
@@ -24,7 +25,9 @@ fn base64url(bytes: &[u8]) -> String {
 
 pub fn generate_code_verifier() -> String {
     let mut bytes = [0u8; 32];
-    getrandom::fill(&mut bytes).expect("getrandom failed");
+    if getrandom::fill(&mut bytes).is_err() {
+        rand::thread_rng().fill_bytes(&mut bytes);
+    }
     base64url(&bytes)
 }
 
@@ -37,7 +40,9 @@ pub fn generate_code_challenge(verifier: &str) -> String {
 
 pub fn generate_state() -> String {
     let mut bytes = [0u8; 16];
-    getrandom::fill(&mut bytes).expect("getrandom failed");
+    if getrandom::fill(&mut bytes).is_err() {
+        rand::thread_rng().fill_bytes(&mut bytes);
+    }
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 

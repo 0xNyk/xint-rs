@@ -3,7 +3,7 @@ use std::io::{self, BufRead, BufReader, IsTerminal, Write};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use crossterm::cursor::MoveTo;
@@ -12,6 +12,10 @@ use crossterm::execute;
 use crossterm::terminal::{self, Clear, ClearType};
 
 use crate::cli::{PolicyMode, TuiArgs};
+use crate::commands::actions::{
+    normalize_interactive_choice, score_interactive_action, INTERACTIVE_ACTIONS,
+};
+use crate::commands::tui_adapter::build_tui_execution_plan;
 use crate::policy;
 
 #[derive(Default)]
@@ -31,6 +35,15 @@ enum DashboardTab {
     Commands,
     Output,
     Help,
+}
+
+#[derive(Copy, Clone)]
+enum UiPhase {
+    Idle,
+    Input,
+    Running,
+    Done,
+    Error,
 }
 
 impl DashboardTab {
@@ -56,19 +69,8 @@ struct UiState {
     tab: DashboardTab,
     output_offset: usize,
     output_search: String,
-}
-
-struct MenuOption {
-    key: &'static str,
-    label: &'static str,
-    aliases: &'static [&'static str],
-    hint: &'static str,
-}
-
-struct CommandMeta {
-    summary: &'static str,
-    example: &'static str,
-    cost_hint: &'static str,
+    inline_prompt_label: Option<String>,
+    inline_prompt_value: String,
 }
 
 struct Theme {
@@ -77,110 +79,6 @@ struct Theme {
     muted: &'static str,
     reset: &'static str,
 }
-
-const MENU_OPTIONS: &[MenuOption] = &[
-    MenuOption {
-        key: "1",
-        label: "Search",
-        aliases: &["search", "s"],
-        hint: "keyword, topic, or boolean query",
-    },
-    MenuOption {
-        key: "2",
-        label: "Trends",
-        aliases: &["trends", "trend", "t"],
-        hint: "location name or blank for global",
-    },
-    MenuOption {
-        key: "3",
-        label: "Profile",
-        aliases: &["profile", "user", "p"],
-        hint: "username (without @)",
-    },
-    MenuOption {
-        key: "4",
-        label: "Thread",
-        aliases: &["thread", "th"],
-        hint: "tweet id or tweet url",
-    },
-    MenuOption {
-        key: "5",
-        label: "Article",
-        aliases: &["article", "a"],
-        hint: "article url or tweet url",
-    },
-    MenuOption {
-        key: "6",
-        label: "Help",
-        aliases: &["help", "h", "?"],
-        hint: "show full CLI help",
-    },
-    MenuOption {
-        key: "0",
-        label: "Exit",
-        aliases: &["exit", "quit", "q"],
-        hint: "close interactive mode",
-    },
-];
-
-const COMMAND_META: &[(&str, CommandMeta)] = &[
-    (
-        "1",
-        CommandMeta {
-            summary: "Discover relevant posts with ranked result quality.",
-            example: "xint search \"open-source ai agents\"",
-            cost_hint: "Low-medium (depends on query depth)",
-        },
-    ),
-    (
-        "2",
-        CommandMeta {
-            summary: "Surface current trend clusters globally or by location.",
-            example: "xint trends \"San Francisco\"",
-            cost_hint: "Low",
-        },
-    ),
-    (
-        "3",
-        CommandMeta {
-            summary: "Inspect profile metadata and recent activity context.",
-            example: "xint profile 0xNyk",
-            cost_hint: "Low",
-        },
-    ),
-    (
-        "4",
-        CommandMeta {
-            summary: "Expand a tweet into threaded conversation context.",
-            example: "xint thread https://x.com/.../status/...",
-            cost_hint: "Medium",
-        },
-    ),
-    (
-        "5",
-        CommandMeta {
-            summary: "Fetch article content from URL or tweet-linked article.",
-            example: "xint article https://x.com/.../status/...",
-            cost_hint: "Medium-high (fetch + parse)",
-        },
-    ),
-    (
-        "6",
-        CommandMeta {
-            summary: "Display full command reference and flags.",
-            example: "xint --help",
-            cost_hint: "None",
-        },
-    ),
-    (
-        "0",
-        CommandMeta {
-            summary: "Exit interactive dashboard.",
-            example: "q",
-            cost_hint: "None",
-        },
-    ),
-];
 
 const HELP_LINES: &[&str] = &[
     "Hotkeys",
@@ -248,85 +146,58 @@ fn prompt_with_default_dashboard(
     session: &SessionState,
     ui_state: &mut UiState,
 ) -> Result<String> {
-    if io::stdin().is_terminal() && io::stdout().is_terminal() {
-        render_dashboard(ui_state, session)?;
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        return prompt_with_default(label, previous);
     }
-    prompt_with_default(label, previous)
-}
 
-fn normalize_choice(raw: &str) -> Option<&'static str> {
-    let value = raw.trim().to_ascii_lowercase();
-    if value.is_empty() {
-        return None;
-    }
-    for option in MENU_OPTIONS {
-        if option.key == value {
-            return Some(option.key);
-        }
-        if option.aliases.iter().any(|alias| alias == &value) {
-            return Some(option.key);
+    struct RawModeGuard;
+    impl Drop for RawModeGuard {
+        fn drop(&mut self) {
+            let _ = terminal::disable_raw_mode();
         }
     }
-    None
-}
 
-fn command_meta(key: &str) -> CommandMeta {
-    COMMAND_META
-        .iter()
-        .find_map(|(k, meta)| {
-            if *k == key {
-                Some(CommandMeta {
-                    summary: meta.summary,
-                    example: meta.example,
-                    cost_hint: meta.cost_hint,
-                })
-            } else {
-                None
+    terminal::enable_raw_mode()?;
+    let _raw_mode_guard = RawModeGuard;
+
+    ui_state.tab = DashboardTab::Output;
+    ui_state.inline_prompt_label = Some(label.to_string());
+    ui_state.inline_prompt_value.clear();
+    render_dashboard(ui_state, session)?;
+
+    let value = loop {
+        if let Event::Key(key_event) = event::read()? {
+            match key_event.code {
+                KeyCode::Enter => break ui_state.inline_prompt_value.clone(),
+                KeyCode::Esc => break String::new(),
+                KeyCode::Backspace => {
+                    ui_state.inline_prompt_value.pop();
+                    render_dashboard(ui_state, session)?;
+                }
+                KeyCode::Char(ch) => {
+                    if key_event.modifiers.contains(event::KeyModifiers::CONTROL) {
+                        if ch == 'c' {
+                            break String::new();
+                        }
+                    } else {
+                        ui_state.inline_prompt_value.push(ch);
+                        render_dashboard(ui_state, session)?;
+                    }
+                }
+                _ => {}
             }
-        })
-        .unwrap_or(CommandMeta {
-            summary: "No metadata available.",
-            example: "-",
-            cost_hint: "Unknown",
-        })
-}
+        }
+    };
 
-fn score_option(option: &MenuOption, query: &str) -> usize {
-    let q = query.to_ascii_lowercase();
-    if q.is_empty() {
-        return 0;
+    ui_state.inline_prompt_label = None;
+    ui_state.inline_prompt_value.clear();
+    render_dashboard(ui_state, session)?;
+
+    if value.trim().is_empty() {
+        Ok(previous.unwrap_or_default().to_string())
+    } else {
+        Ok(value)
     }
-    let mut score = 0usize;
-    if option.key == q {
-        score += 100;
-    }
-    if option.label.eq_ignore_ascii_case(&q) {
-        score += 90;
-    }
-    if option
-        .aliases
-        .iter()
-        .any(|alias| alias.eq_ignore_ascii_case(&q))
-    {
-        score += 80;
-    }
-    if option.label.to_ascii_lowercase().starts_with(&q) {
-        score += 70;
-    }
-    if option
-        .aliases
-        .iter()
-        .any(|alias| alias.to_ascii_lowercase().starts_with(&q))
-    {
-        score += 60;
-    }
-    if option.label.to_ascii_lowercase().contains(&q) {
-        score += 40;
-    }
-    if option.hint.to_ascii_lowercase().contains(&q) {
-        score += 20;
-    }
-    score
 }
 
 fn match_palette(query: &str) -> Option<usize> {
@@ -337,8 +208,8 @@ fn match_palette(query: &str) -> Option<usize> {
 
     let mut best_index = None;
     let mut best_score = 0usize;
-    for (index, option) in MENU_OPTIONS.iter().enumerate() {
-        let score = score_option(option, trimmed);
+    for (index, option) in INTERACTIVE_ACTIONS.iter().enumerate() {
+        let score = score_interactive_action(option, trimmed);
         if score > best_score {
             best_score = score;
             best_index = Some(index);
@@ -384,7 +255,7 @@ fn pad_text(value: &str, width: usize) -> String {
 fn build_menu_lines(active_index: usize) -> Vec<String> {
     let mut lines = vec!["Menu".to_string(), String::new()];
 
-    for (index, option) in MENU_OPTIONS.iter().enumerate() {
+    for (index, option) in INTERACTIVE_ACTIONS.iter().enumerate() {
         let pointer = if index == active_index { ">" } else { " " };
         let aliases = if option.aliases.is_empty() {
             String::new()
@@ -402,16 +273,55 @@ fn build_menu_lines(active_index: usize) -> Vec<String> {
 }
 
 fn build_command_drawer(active_index: usize) -> Vec<String> {
-    let selected = MENU_OPTIONS.get(active_index).unwrap_or(&MENU_OPTIONS[0]);
-    let meta = command_meta(selected.key);
+    let selected = INTERACTIVE_ACTIONS
+        .get(active_index)
+        .unwrap_or(&INTERACTIVE_ACTIONS[0]);
     vec![
         "Command details".to_string(),
         String::new(),
         format!("Selected: {}", selected.label),
-        format!("Summary: {}", meta.summary),
-        format!("Example: {}", meta.example),
-        format!("Cost: {}", meta.cost_hint),
+        format!("Summary: {}", selected.summary),
+        format!("Example: {}", selected.example),
+        format!("Cost: {}", selected.cost_hint),
     ]
+}
+
+fn resolve_ui_phase(session: &SessionState, ui_state: &UiState) -> UiPhase {
+    if ui_state.inline_prompt_label.is_some() {
+        return UiPhase::Input;
+    }
+    let status = session
+        .last_status
+        .as_deref()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if status.starts_with("running") {
+        UiPhase::Running
+    } else if status.contains("failed") || status.contains("error") {
+        UiPhase::Error
+    } else if status.contains("success") {
+        UiPhase::Done
+    } else {
+        UiPhase::Idle
+    }
+}
+
+fn phase_badge(phase: UiPhase) -> String {
+    match phase {
+        UiPhase::Running => {
+            let frames = ["|", "/", "-", "\\"];
+            let millis = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_millis() as usize)
+                .unwrap_or(0);
+            let idx = (millis / 120) % frames.len();
+            format!("[RUNNING {}]", frames[idx])
+        }
+        UiPhase::Input => "[INPUT <>]".to_string(),
+        UiPhase::Done => "[DONE ok]".to_string(),
+        UiPhase::Error => "[ERROR !!]".to_string(),
+        UiPhase::Idle => "[IDLE]".to_string(),
+    }
 }
 
 fn output_view_lines(
@@ -446,6 +356,10 @@ fn output_view_lines(
         "Last run".to_string(),
         String::new(),
         format!(
+            "phase: {}",
+            phase_badge(resolve_ui_phase(session, ui_state))
+        ),
+        format!(
             "command: {}",
             session.last_command.as_deref().unwrap_or("-")
         ),
@@ -461,6 +375,13 @@ fn output_view_lines(
         String::new(),
         "output:".to_string(),
     ];
+
+    if let Some(label) = &ui_state.inline_prompt_label {
+        lines.push(String::new());
+        lines.push(label.clone());
+        lines.push(format!("> {}█", ui_state.inline_prompt_value));
+        lines.push(String::new());
+    }
 
     if start >= end {
         lines.push("(no output lines for current filter)".to_string());
@@ -494,6 +415,30 @@ fn build_tab_lines(session: &SessionState, ui_state: &mut UiState, viewport: usi
     }
 }
 
+fn build_status_line(session: &SessionState, ui_state: &UiState, width: usize) -> String {
+    let selected = INTERACTIVE_ACTIONS
+        .get(ui_state.active_index)
+        .unwrap_or(&INTERACTIVE_ACTIONS[0]);
+    let phase = resolve_ui_phase(session, ui_state);
+    let focus = if let Some(label) = &ui_state.inline_prompt_label {
+        format!("input:{label}")
+    } else {
+        format!("tab:{}", ui_state.tab.label())
+    };
+    let status = session.last_status.as_deref().unwrap_or("-");
+    pad_text(
+        &format!(
+            " {} {}:{} | {} | {} ",
+            phase_badge(phase),
+            selected.key,
+            selected.label,
+            focus,
+            status
+        ),
+        max(1usize, width),
+    )
+}
+
 fn render_double_pane(
     ui_state: &mut UiState,
     session: &SessionState,
@@ -501,7 +446,7 @@ fn render_double_pane(
     rows: usize,
 ) -> Result<()> {
     let theme = active_theme();
-    let total_rows = max(12usize, rows.saturating_sub(7));
+    let total_rows = max(12usize, rows.saturating_sub(8));
     let left_box_width = max(46usize, (cols * 45) / 100);
     let right_box_width = max(30usize, cols.saturating_sub(left_box_width + 1));
     let left_inner = max(20usize, left_box_width.saturating_sub(2));
@@ -599,6 +544,16 @@ fn render_double_pane(
         "-".repeat(right_box_width.saturating_sub(2)),
         theme.reset
     )?;
+    writeln!(
+        stdout,
+        "{}|{}{}{}{}|{}",
+        theme.border,
+        theme.reset,
+        theme.accent,
+        build_status_line(session, ui_state, cols.saturating_sub(2)),
+        theme.reset,
+        theme.border
+    )?;
 
     let footer = " Up/Down Navigate | Enter Run | Tab Tabs | F Search Output | PgUp/PgDn Scroll | / Palette | q Quit ";
     writeln!(
@@ -630,7 +585,7 @@ fn render_single_pane(
 ) -> Result<()> {
     let theme = active_theme();
     let width = max(30usize, cols.saturating_sub(2));
-    let total_rows = max(10usize, rows.saturating_sub(6));
+    let total_rows = max(10usize, rows.saturating_sub(7));
 
     let tabs = [
         DashboardTab::Commands,
@@ -734,6 +689,16 @@ fn render_single_pane(
         "-".repeat(width),
         theme.reset
     )?;
+    writeln!(
+        stdout,
+        "{}|{}{}{}{}|{}",
+        theme.border,
+        theme.reset,
+        theme.accent,
+        build_status_line(session, ui_state, width),
+        theme.reset,
+        theme.border
+    )?;
     let footer = " Tab Tabs | F Search Output | PgUp/PgDn Scroll | / Palette | q Quit ";
     writeln!(
         stdout,
@@ -767,7 +732,7 @@ fn render_dashboard(ui_state: &mut UiState, session: &SessionState) -> Result<()
 
 fn print_menu() {
     println!("\n=== xint interactive ===");
-    for option in MENU_OPTIONS {
+    for option in INTERACTIVE_ACTIONS {
         let aliases = if option.aliases.is_empty() {
             String::new()
         } else {
@@ -800,14 +765,14 @@ fn select_option_interactive(session: &mut SessionState, ui_state: &mut UiState)
             match key_event.code {
                 KeyCode::Up => {
                     ui_state.active_index = if ui_state.active_index == 0 {
-                        MENU_OPTIONS.len() - 1
+                        INTERACTIVE_ACTIONS.len() - 1
                     } else {
                         ui_state.active_index - 1
                     };
                     render_dashboard(ui_state, session)?;
                 }
                 KeyCode::Down => {
-                    ui_state.active_index = (ui_state.active_index + 1) % MENU_OPTIONS.len();
+                    ui_state.active_index = (ui_state.active_index + 1) % INTERACTIVE_ACTIONS.len();
                     render_dashboard(ui_state, session)?;
                 }
                 KeyCode::Tab => {
@@ -823,7 +788,8 @@ fn select_option_interactive(session: &mut SessionState, ui_state: &mut UiState)
                     render_dashboard(ui_state, session)?;
                 }
                 KeyCode::Enter => {
-                    let selected = MENU_OPTIONS
+                    ui_state.tab = DashboardTab::Output;
+                    let selected = INTERACTIVE_ACTIONS
                         .get(ui_state.active_index)
                         .map(|option| option.key.to_string())
                         .unwrap_or_else(|| "0".to_string());
@@ -850,43 +816,15 @@ fn select_option_interactive(session: &mut SessionState, ui_state: &mut UiState)
                     render_dashboard(ui_state, session)?;
                 }
                 KeyCode::Char('f') | KeyCode::Char('F') => {
-                    terminal::disable_raw_mode()?;
-                    let query = prompt_line("\nOutput search (blank clears): ")?;
-                    terminal::enable_raw_mode()?;
-                    ui_state.output_search = query.trim().to_string();
-                    ui_state.output_offset = 0;
                     ui_state.tab = DashboardTab::Output;
-                    session.last_status = Some(if ui_state.output_search.is_empty() {
-                        "output filter cleared".to_string()
-                    } else {
-                        format!("output filter active: {}", ui_state.output_search)
-                    });
-                    render_dashboard(ui_state, session)?;
+                    return Ok("__filter__".to_string());
                 }
                 KeyCode::Char('/') => {
-                    terminal::disable_raw_mode()?;
-                    let query = prompt_line("\nPalette (/): ")?;
-                    terminal::enable_raw_mode()?;
-                    if let Some(index) = match_palette(&query) {
-                        ui_state.active_index = index;
-                        let selected = MENU_OPTIONS
-                            .get(ui_state.active_index)
-                            .map(|option| option.key.to_string())
-                            .unwrap_or_else(|| "0".to_string());
-                        return Ok(selected);
-                    }
-                    session.last_status = Some(format!(
-                        "no palette match: {}",
-                        if query.trim().is_empty() {
-                            "(empty)"
-                        } else {
-                            query.trim()
-                        }
-                    ));
-                    render_dashboard(ui_state, session)?;
+                    ui_state.tab = DashboardTab::Output;
+                    return Ok("__palette__".to_string());
                 }
                 KeyCode::Char(ch) => {
-                    if let Some(value) = normalize_choice(&ch.to_string()) {
+                    if let Some(value) = normalize_interactive_choice(&ch.to_string()) {
                         return Ok(value.to_string());
                     }
                 }
@@ -1003,7 +941,7 @@ fn run_subcommand(
 
 pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
     let mut session = SessionState::default();
-    let initial_index = MENU_OPTIONS
+    let initial_index = INTERACTIVE_ACTIONS
         .iter()
         .position(|option| option.key == "1")
         .unwrap_or(0);
@@ -1013,11 +951,52 @@ pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
         tab: DashboardTab::Output,
         output_offset: 0,
         output_search: String::new(),
+        inline_prompt_label: None,
+        inline_prompt_value: String::new(),
     };
 
     loop {
-        let choice = select_option_interactive(&mut session, &mut ui_state)?;
-        let Some(choice) = normalize_choice(&choice) else {
+        let mut choice = select_option_interactive(&mut session, &mut ui_state)?;
+        if choice == "__filter__" {
+            let query = prompt_with_default_dashboard(
+                "Output search (blank clears)",
+                Some(""),
+                &session,
+                &mut ui_state,
+            )?;
+            ui_state.output_search = query.trim().to_string();
+            ui_state.output_offset = 0;
+            ui_state.tab = DashboardTab::Output;
+            session.last_status = Some(if ui_state.output_search.is_empty() {
+                "output filter cleared".to_string()
+            } else {
+                format!("output filter active: {}", ui_state.output_search)
+            });
+            continue;
+        }
+        if choice == "__palette__" {
+            let query =
+                prompt_with_default_dashboard("Palette (/)", Some(""), &session, &mut ui_state)?;
+            if let Some(index) = match_palette(&query) {
+                ui_state.active_index = index;
+                ui_state.tab = DashboardTab::Output;
+                choice = INTERACTIVE_ACTIONS
+                    .get(index)
+                    .map(|option| option.key.to_string())
+                    .unwrap_or_else(|| "0".to_string());
+            } else {
+                session.last_status = Some(format!(
+                    "no palette match: {}",
+                    if query.trim().is_empty() {
+                        "(empty)"
+                    } else {
+                        query.trim()
+                    }
+                ));
+                continue;
+            }
+        }
+        let Some(choice) = normalize_interactive_choice(&choice) else {
             session.last_status = Some("invalid selection".to_string());
             continue;
         };
@@ -1039,13 +1018,13 @@ pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
                     continue;
                 }
                 session.last_search = Some(query.clone());
-                session.last_command = Some(format!("xint search {query}"));
-                run_subcommand(
-                    &["search".to_string(), query],
-                    policy_mode,
-                    &mut session,
-                    &mut ui_state,
-                )?;
+                let plan_result = build_tui_execution_plan(choice, Some(&query));
+                let Some(plan) = plan_result.data else {
+                    session.last_status = Some(plan_result.message);
+                    continue;
+                };
+                session.last_command = Some(plan.command.clone());
+                run_subcommand(&plan.args, policy_mode, &mut session, &mut ui_state)?;
             }
             "2" => {
                 let location = prompt_with_default_dashboard(
@@ -1055,26 +1034,13 @@ pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
                     &mut ui_state,
                 )?;
                 session.last_location = Some(location.clone());
-                session.last_command = if location.is_empty() {
-                    Some("xint trends".to_string())
-                } else {
-                    Some(format!("xint trends {location}"))
+                let plan_result = build_tui_execution_plan(choice, Some(&location));
+                let Some(plan) = plan_result.data else {
+                    session.last_status = Some(plan_result.message);
+                    continue;
                 };
-                if location.is_empty() {
-                    run_subcommand(
-                        &["trends".to_string()],
-                        policy_mode,
-                        &mut session,
-                        &mut ui_state,
-                    )?;
-                } else {
-                    run_subcommand(
-                        &["trends".to_string(), location],
-                        policy_mode,
-                        &mut session,
-                        &mut ui_state,
-                    )?;
-                }
+                session.last_command = Some(plan.command.clone());
+                run_subcommand(&plan.args, policy_mode, &mut session, &mut ui_state)?;
             }
             "3" => {
                 let username = prompt_with_default_dashboard(
@@ -1090,13 +1056,13 @@ pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
                     continue;
                 }
                 session.last_username = Some(username.clone());
-                session.last_command = Some(format!("xint profile {username}"));
-                run_subcommand(
-                    &["profile".to_string(), username],
-                    policy_mode,
-                    &mut session,
-                    &mut ui_state,
-                )?;
+                let plan_result = build_tui_execution_plan(choice, Some(&username));
+                let Some(plan) = plan_result.data else {
+                    session.last_status = Some(plan_result.message);
+                    continue;
+                };
+                session.last_command = Some(plan.command.clone());
+                run_subcommand(&plan.args, policy_mode, &mut session, &mut ui_state)?;
             }
             "4" => {
                 let tweet_ref = prompt_with_default_dashboard(
@@ -1110,13 +1076,13 @@ pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
                     continue;
                 }
                 session.last_tweet_ref = Some(tweet_ref.clone());
-                session.last_command = Some(format!("xint thread {tweet_ref}"));
-                run_subcommand(
-                    &["thread".to_string(), tweet_ref],
-                    policy_mode,
-                    &mut session,
-                    &mut ui_state,
-                )?;
+                let plan_result = build_tui_execution_plan(choice, Some(&tweet_ref));
+                let Some(plan) = plan_result.data else {
+                    session.last_status = Some(plan_result.message);
+                    continue;
+                };
+                session.last_command = Some(plan.command.clone());
+                run_subcommand(&plan.args, policy_mode, &mut session, &mut ui_state)?;
             }
             "5" => {
                 let url = prompt_with_default_dashboard(
@@ -1130,22 +1096,22 @@ pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
                     continue;
                 }
                 session.last_article_url = Some(url.clone());
-                session.last_command = Some(format!("xint article {url}"));
-                run_subcommand(
-                    &["article".to_string(), url],
-                    policy_mode,
-                    &mut session,
-                    &mut ui_state,
-                )?;
+                let plan_result = build_tui_execution_plan(choice, Some(&url));
+                let Some(plan) = plan_result.data else {
+                    session.last_status = Some(plan_result.message);
+                    continue;
+                };
+                session.last_command = Some(plan.command.clone());
+                run_subcommand(&plan.args, policy_mode, &mut session, &mut ui_state)?;
             }
             "6" => {
-                session.last_command = Some("xint --help".to_string());
-                run_subcommand(
-                    &["--help".to_string()],
-                    policy_mode,
-                    &mut session,
-                    &mut ui_state,
-                )?;
+                let plan_result = build_tui_execution_plan(choice, None);
+                let Some(plan) = plan_result.data else {
+                    session.last_status = Some(plan_result.message);
+                    continue;
+                };
+                session.last_command = Some(plan.command.clone());
+                run_subcommand(&plan.args, policy_mode, &mut session, &mut ui_state)?;
             }
             _ => {}
         }
@@ -1156,19 +1122,20 @@ pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{match_palette, normalize_choice};
+    use super::match_palette;
+    use crate::commands::actions::normalize_interactive_choice;
 
     #[test]
     fn normalize_choice_supports_numeric_and_alias_inputs() {
-        assert_eq!(normalize_choice("1"), Some("1"));
-        assert_eq!(normalize_choice("search"), Some("1"));
-        assert_eq!(normalize_choice("Q"), Some("0"));
+        assert_eq!(normalize_interactive_choice("1"), Some("1"));
+        assert_eq!(normalize_interactive_choice("search"), Some("1"));
+        assert_eq!(normalize_interactive_choice("Q"), Some("0"));
     }
 
     #[test]
     fn normalize_choice_rejects_invalid_values() {
-        assert_eq!(normalize_choice(""), None);
-        assert_eq!(normalize_choice("unknown"), None);
+        assert_eq!(normalize_interactive_choice(""), None);
+        assert_eq!(normalize_interactive_choice("unknown"), None);
     }
 
     #[test]
