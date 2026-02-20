@@ -191,8 +191,11 @@ fn prompt_with_default_dashboard(
     render_dashboard(ui_state, session)?;
 
     let value = loop {
-        if let Event::Key(key_event) = event::read()? {
-            match key_event.code {
+        match event::read()? {
+            Event::Resize(_, _) => {
+                render_dashboard(ui_state, session)?;
+            }
+            Event::Key(key_event) => match key_event.code {
                 KeyCode::Enter => break ui_state.inline_prompt_value.clone(),
                 KeyCode::Esc => break String::new(),
                 KeyCode::Backspace => {
@@ -210,7 +213,8 @@ fn prompt_with_default_dashboard(
                     }
                 }
                 _ => {}
-            }
+            },
+            _ => {}
         }
     };
 
@@ -845,8 +849,11 @@ fn select_option_interactive(session: &mut SessionState, ui_state: &mut UiState)
     render_dashboard(ui_state, session)?;
 
     loop {
-        if let Event::Key(key_event) = event::read()? {
-            match key_event.code {
+        match event::read()? {
+            Event::Resize(_, _) => {
+                render_dashboard(ui_state, session)?;
+            }
+            Event::Key(key_event) => match key_event.code {
                 KeyCode::Up => {
                     ui_state.active_index = if ui_state.active_index == 0 {
                         INTERACTIVE_ACTIONS.len() - 1
@@ -912,7 +919,8 @@ fn select_option_interactive(session: &mut SessionState, ui_state: &mut UiState)
                     }
                 }
                 _ => {}
-            }
+            },
+            _ => {}
         }
     }
 }
