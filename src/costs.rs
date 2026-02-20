@@ -219,7 +219,7 @@ pub fn get_cost_summary(costs_path: &Path, period: &str) -> String {
         if !agg.by_operation.is_empty() {
             out.push_str("\n  By operation:\n");
             let mut ops: Vec<_> = agg.by_operation.iter().collect();
-            ops.sort_by(|a, b| b.1.cost.partial_cmp(&a.1.cost).unwrap());
+            ops.sort_by(|a, b| b.1.cost.total_cmp(&a.1.cost));
             for (op, stats) in ops {
                 out.push_str(&format!(
                     "    {:<16} {:>3} calls, {:>5} tweets, ${:>6.2}\n",

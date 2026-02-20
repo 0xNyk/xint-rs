@@ -1,3 +1,4 @@
+mod action_result;
 mod api;
 mod auth;
 mod cache;
@@ -8,6 +9,7 @@ mod config;
 mod costs;
 mod format;
 mod mcp;
+mod mcp_dispatcher;
 mod models;
 mod output_meta;
 mod policy;

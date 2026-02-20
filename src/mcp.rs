@@ -7,11 +7,18 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
+use crate::api::{grok, twitter, xai};
+use crate::auth::oauth;
+use crate::cache;
 use crate::cli::{McpArgs, PolicyMode};
+use crate::client::XClient;
 use crate::config::Config;
 use crate::costs;
+use crate::mcp_dispatcher::{resolve_tool_route, McpToolRoute};
+use crate::models::Tweet;
 use crate::policy;
 use crate::reliability;
+use crate::sentiment;
 
 // ============================================================================
 // Tool Definitions
@@ -692,13 +699,14 @@ impl MCPServer {
 
                 match execution {
                     Ok(result) => {
+                        let command_name = format!("mcp:{name}");
                         reliability::record_command_result(
                             &self.reliability_path,
-                            &format!("mcp:{name}"),
+                            &command_name,
                             true,
                             started_at.elapsed().as_millis(),
                             reliability::ReliabilityMode::Mcp,
-                            false,
+                            reliability::consume_command_fallback(&command_name),
                         );
                         let response = serde_json::json!({
                             "jsonrpc": "2.0",
@@ -749,163 +757,605 @@ impl MCPServer {
         name: &str,
         args: serde_json::Value,
     ) -> Result<Vec<MCPContent>, String> {
-        match name {
-            "xint_search" => {
+        fn make_content(text: String) -> Vec<MCPContent> {
+            vec![MCPContent {
+                content_type: "text".to_string(),
+                text,
+            }]
+        }
+
+        fn json_content(payload: serde_json::Value) -> Result<Vec<MCPContent>, String> {
+            serde_json::to_string_pretty(&payload)
+                .map(make_content)
+                .map_err(|e| format!("Failed to encode MCP response payload: {e}"))
+        }
+
+        fn bool_arg(args: &serde_json::Value, camel: &str, snake: &str) -> bool {
+            args.get(camel)
+                .and_then(|v| v.as_bool())
+                .or_else(|| args.get(snake).and_then(|v| v.as_bool()))
+                .unwrap_or(false)
+        }
+
+        fn extract_tweet_id(input: &str) -> String {
+            if let Some(idx) = input.find("/status/") {
+                let suffix = &input[(idx + "/status/".len())..];
+                let id: String = suffix.chars().take_while(|c| c.is_ascii_digit()).collect();
+                if !id.is_empty() {
+                    return id;
+                }
+            }
+            input.to_string()
+        }
+
+        fn resolve_woeid(location: &str) -> Result<u32, String> {
+            let trimmed = location.trim();
+            if let Ok(woeid) = trimmed.parse::<u32>() {
+                return Ok(woeid);
+            }
+
+            let key = trimmed.to_lowercase();
+            let woeid = match key.as_str() {
+                "worldwide" | "world" | "global" => Some(1),
+                "us" | "usa" | "united states" => Some(23424977),
+                "uk" | "united kingdom" => Some(23424975),
+                "canada" => Some(23424775),
+                "australia" => Some(23424748),
+                "india" => Some(23424848),
+                "japan" => Some(23424856),
+                "germany" => Some(23424829),
+                "france" => Some(23424819),
+                "brazil" => Some(23424768),
+                "mexico" => Some(23424900),
+                "spain" => Some(23424950),
+                "italy" => Some(23424853),
+                "netherlands" => Some(23424909),
+                "south korea" | "korea" => Some(23424868),
+                "turkey" => Some(23424969),
+                "indonesia" => Some(23424846),
+                "nigeria" => Some(23424908),
+                "south africa" => Some(23424942),
+                "singapore" => Some(23424948),
+                "new zealand" => Some(23424916),
+                "argentina" => Some(23424747),
+                "colombia" => Some(23424787),
+                "philippines" => Some(23424934),
+                "egypt" => Some(23424802),
+                "israel" => Some(23424852),
+                "ireland" => Some(23424803),
+                "sweden" => Some(23424954),
+                "poland" => Some(23424923),
+                _ => None,
+            };
+
+            woeid.ok_or_else(|| {
+                format!(
+                    "Unknown location: \"{location}\". Use a known location name or numeric WOEID."
+                )
+            })
+        }
+
+        fn language_for_woeid(woeid: u32) -> &'static str {
+            match woeid {
+                23424856 => "ja",
+                23424829 => "de",
+                23424819 => "fr",
+                23424768 => "pt",
+                23424900 | 23424950 | 23424747 | 23424787 => "es",
+                23424853 => "it",
+                23424868 => "ko",
+                23424969 => "tr",
+                23424846 => "id",
+                23424923 => "pl",
+                23424954 => "sv",
+                _ => "en",
+            }
+        }
+
+        fn woeid_name(woeid: u32) -> &'static str {
+            match woeid {
+                1 => "Worldwide",
+                23424977 => "United States",
+                23424975 => "United Kingdom",
+                23424775 => "Canada",
+                23424748 => "Australia",
+                23424848 => "India",
+                23424856 => "Japan",
+                23424829 => "Germany",
+                23424819 => "France",
+                23424768 => "Brazil",
+                23424900 => "Mexico",
+                23424950 => "Spain",
+                23424853 => "Italy",
+                23424909 => "Netherlands",
+                23424868 => "South Korea",
+                23424969 => "Turkey",
+                23424846 => "Indonesia",
+                23424908 => "Nigeria",
+                23424942 => "South Africa",
+                23424948 => "Singapore",
+                23424916 => "New Zealand",
+                23424747 => "Argentina",
+                23424787 => "Colombia",
+                23424934 => "Philippines",
+                23424802 => "Egypt",
+                23424852 => "Israel",
+                23424803 => "Ireland",
+                23424954 => "Sweden",
+                23424923 => "Poland",
+                _ => "Unknown",
+            }
+        }
+
+        fn bearer_runtime() -> Result<(XClient, String), String> {
+            let runtime_config =
+                Config::load().map_err(|e| format!("Failed to load config: {e}"))?;
+            let token = runtime_config
+                .require_bearer_token()
+                .map_err(|e| e.to_string())?
+                .to_string();
+            let client =
+                XClient::new().map_err(|e| format!("Failed to initialize HTTP client: {e}"))?;
+            Ok((client, token))
+        }
+
+        fn xai_runtime() -> Result<String, String> {
+            let runtime_config =
+                Config::load().map_err(|e| format!("Failed to load config: {e}"))?;
+            runtime_config
+                .require_xai_key()
+                .map(|v| v.to_string())
+                .map_err(|e| e.to_string())
+        }
+
+        fn xai_management_runtime() -> Result<String, String> {
+            let runtime_config =
+                Config::load().map_err(|e| format!("Failed to load config: {e}"))?;
+            runtime_config
+                .require_xai_management_key()
+                .map(|v| v.to_string())
+                .map_err(|e| e.to_string())
+        }
+
+        async fn oauth_runtime() -> Result<(XClient, String), String> {
+            let runtime_config =
+                Config::load().map_err(|e| format!("Failed to load config: {e}"))?;
+            let client =
+                XClient::new().map_err(|e| format!("Failed to initialize HTTP client: {e}"))?;
+            let client_id = runtime_config
+                .require_client_id()
+                .map_err(|e| e.to_string())?
+                .to_string();
+            let (token, _) =
+                oauth::get_valid_token(&client, &runtime_config.tokens_path(), &client_id)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            Ok((client, token))
+        }
+
+        let route_result = resolve_tool_route(name);
+        let Some(route) = route_result.data else {
+            return Err(route_result.message);
+        };
+        match route {
+            McpToolRoute::Search => {
+                let (client, token) = bearer_runtime()?;
                 let query = args
                     .get("query")
                     .and_then(|v| v.as_str())
                     .ok_or("Missing query")?;
                 let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(15) as usize;
+                let pages = ((limit.max(1) as u32).saturating_add(19) / 20).min(5);
+                let sort_order = match args.get("sort").and_then(|v| v.as_str()).unwrap_or("likes")
+                {
+                    "recent" | "recency" => "recency",
+                    _ => "relevancy",
+                };
+                let since = args.get("since").and_then(|v| v.as_str());
+                let no_retweets = bool_arg(&args, "noRetweets", "no_retweets");
+                let no_replies = bool_arg(&args, "noReplies", "no_replies");
 
-                // Note: In real implementation, we'd call the API here
-                // For now, return a placeholder
-                Ok(vec![MCPContent {
-                    content_type: "text".to_string(),
-                    text: format!("Search: {query} (limit: {limit})"),
-                }])
+                let mut tweets = twitter::search(
+                    &client, &token, query, pages, sort_order, since, None, false,
+                )
+                .await
+                .map_err(|e| format!("Search failed: {e}"))?;
+
+                if no_retweets {
+                    tweets.retain(|t| !t.text.starts_with("RT @"));
+                }
+                if no_replies {
+                    tweets.retain(|t| t.conversation_id == t.id);
+                }
+                let shown: Vec<_> = tweets.into_iter().take(limit.max(1)).collect();
+                costs::track_cost(
+                    &self.costs_path,
+                    "search",
+                    "/2/tweets/search/recent",
+                    shown.len() as u64,
+                );
+
+                json_content(serde_json::json!({
+                    "type": "success",
+                    "message": "Search completed.",
+                    "data": shown
+                }))
             }
-            "xint_profile" => {
+            McpToolRoute::Profile => {
+                let (client, token) = bearer_runtime()?;
                 let username = args
                     .get("username")
                     .and_then(|v| v.as_str())
                     .ok_or("Missing username")?;
+                let count = args.get("count").and_then(|v| v.as_u64()).unwrap_or(20) as u32;
+                let include_replies = bool_arg(&args, "includeReplies", "include_replies");
+                let normalized = username.trim_start_matches('@');
 
-                Ok(vec![MCPContent {
-                    content_type: "text".to_string(),
-                    text: format!("Profile: @{username}"),
-                }])
+                let (user, tweets) =
+                    twitter::get_profile(&client, &token, normalized, count, include_replies)
+                        .await
+                        .map_err(|e| format!("Profile lookup failed: {e}"))?;
+                costs::track_cost(
+                    &self.costs_path,
+                    "profile",
+                    &format!("/2/users/by/username/{normalized}"),
+                    tweets.len() as u64 + 1,
+                );
+
+                json_content(serde_json::json!({
+                    "type": "success",
+                    "message": "Profile lookup completed.",
+                    "data": {
+                        "user": user,
+                        "tweets": tweets
+                    }
+                }))
             }
-            "xint_thread" => {
+            McpToolRoute::Thread => {
+                let (client, token) = bearer_runtime()?;
                 let tweet_id = args
                     .get("tweet_id")
+                    .or_else(|| args.get("tweetId"))
                     .and_then(|v| v.as_str())
-                    .ok_or("Missing tweet_id")?;
+                    .ok_or("Missing tweet_id or tweetId")?;
+                let pages = args.get("pages").and_then(|v| v.as_u64()).unwrap_or(2) as u32;
+                let normalized_id = extract_tweet_id(tweet_id);
 
-                Ok(vec![MCPContent {
-                    content_type: "text".to_string(),
-                    text: format!("Thread for tweet: {tweet_id}"),
-                }])
+                let tweets = twitter::get_thread(&client, &token, &normalized_id, pages)
+                    .await
+                    .map_err(|e| format!("Thread lookup failed: {e}"))?;
+                costs::track_cost(
+                    &self.costs_path,
+                    "thread",
+                    "/2/tweets/search/recent",
+                    tweets.len() as u64,
+                );
+
+                json_content(serde_json::json!({
+                    "type": "success",
+                    "message": "Thread lookup completed.",
+                    "data": {
+                        "tweets": tweets
+                    }
+                }))
             }
-            "xint_tweet" => {
+            McpToolRoute::Tweet => {
+                let (client, token) = bearer_runtime()?;
                 let tweet_id = args
                     .get("tweet_id")
+                    .or_else(|| args.get("tweetId"))
                     .and_then(|v| v.as_str())
-                    .ok_or("Missing tweet_id")?;
+                    .ok_or("Missing tweet_id or tweetId")?;
+                let normalized_id = extract_tweet_id(tweet_id);
+                let tweet = twitter::get_tweet(&client, &token, &normalized_id)
+                    .await
+                    .map_err(|e| format!("Tweet lookup failed: {e}"))?;
+                costs::track_cost(
+                    &self.costs_path,
+                    "tweet",
+                    &format!("/2/tweets/{normalized_id}"),
+                    if tweet.is_some() { 1 } else { 0 },
+                );
 
-                Ok(vec![MCPContent {
-                    content_type: "text".to_string(),
-                    text: format!("Tweet: {tweet_id}"),
-                }])
+                json_content(serde_json::json!({
+                    "type": "success",
+                    "message": "Tweet lookup completed.",
+                    "data": tweet
+                }))
             }
-            "xint_trends" => {
+            McpToolRoute::Trends => {
+                let (client, token) = bearer_runtime()?;
                 let location = args
                     .get("location")
                     .and_then(|v| v.as_str())
                     .unwrap_or("worldwide");
+                let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
+                let woeid = resolve_woeid(location)?;
+                let trends_path = format!("trends/by/woeid/{woeid}");
 
-                Ok(vec![MCPContent {
-                    content_type: "text".to_string(),
-                    text: format!("Trends for: {location}"),
-                }])
+                let primary = client.bearer_get(&trends_path, &token).await.ok().and_then(|raw| {
+                    let data = raw.data?;
+                    let arr = data.as_array()?;
+                    let trends: Vec<serde_json::Value> = arr
+                        .iter()
+                        .filter_map(|item| {
+                            let name = item.get("trend_name")?.as_str()?;
+                            Some(serde_json::json!({
+                                "name": name,
+                                "tweet_count": item.get("tweet_count").and_then(|v| v.as_u64()),
+                                "url": format!("https://x.com/search?q={}", name.replace(' ', "%20")),
+                                "category": item.get("category").and_then(|v| v.as_str()),
+                            }))
+                        })
+                        .collect();
+
+                    if trends.is_empty() {
+                        None
+                    } else {
+                        Some(serde_json::json!({
+                            "source": "api",
+                            "location": woeid_name(woeid),
+                            "woeid": woeid,
+                            "trends": trends.into_iter().take(limit.max(1)).collect::<Vec<_>>(),
+                            "fetched_at": chrono::Utc::now().to_rfc3339()
+                        }))
+                    }
+                });
+
+                if let Some(result) = primary {
+                    costs::track_cost(&self.costs_path, "trends", "/2/trends/by/woeid", 0);
+                    return json_content(serde_json::json!({
+                        "type": "success",
+                        "message": "Trends fetch completed.",
+                        "data": result
+                    }));
+                }
+
+                let fallback_query = format!("-is:retweet lang:{}", language_for_woeid(woeid));
+                let fallback_tweets = twitter::search(
+                    &client,
+                    &token,
+                    &fallback_query,
+                    1,
+                    "recency",
+                    None,
+                    None,
+                    false,
+                )
+                .await
+                .map_err(|e| format!("Trends fallback failed: {e}"))?;
+                costs::track_cost(
+                    &self.costs_path,
+                    "search",
+                    "/2/tweets/search/recent",
+                    fallback_tweets.len() as u64,
+                );
+
+                let mut counts = std::collections::HashMap::<String, u64>::new();
+                for tweet in &fallback_tweets {
+                    for hashtag in &tweet.hashtags {
+                        let tag = format!("#{}", hashtag.to_lowercase());
+                        *counts.entry(tag).or_insert(0) += 1;
+                    }
+                    for word in tweet.text.split_whitespace() {
+                        if word.starts_with('#') && word.len() > 1 {
+                            let tag = word.to_lowercase();
+                            *counts.entry(tag).or_insert(0) += 1;
+                        }
+                        if word.starts_with('$')
+                            && word.len() > 1
+                            && word[1..].chars().all(|c| c.is_ascii_alphabetic())
+                        {
+                            let tag = word.to_uppercase();
+                            *counts.entry(tag).or_insert(0) += 1;
+                        }
+                    }
+                }
+
+                let mut sorted: Vec<(String, u64)> = counts
+                    .into_iter()
+                    .filter(|(_, count)| *count >= 2)
+                    .collect();
+                sorted.sort_by(|a, b| b.1.cmp(&a.1));
+
+                let trends: Vec<serde_json::Value> = sorted
+                    .into_iter()
+                    .take(limit.max(1))
+                    .map(|(name, count)| {
+                        serde_json::json!({
+                            "name": name,
+                            "tweet_count": count,
+                            "url": format!("https://x.com/search?q={}", name.replace(' ', "%20"))
+                        })
+                    })
+                    .collect();
+
+                reliability::mark_command_fallback("mcp:xint_trends");
+                json_content(serde_json::json!({
+                    "type": "success",
+                    "message": "Trends fetch completed via fallback.",
+                    "data": {
+                        "source": "search_fallback",
+                        "location": woeid_name(woeid),
+                        "woeid": woeid,
+                        "trends": trends,
+                        "fetched_at": chrono::Utc::now().to_rfc3339()
+                    }
+                }))
             }
-            "xint_xsearch" => {
+            McpToolRoute::XSearch => {
+                let api_key = xai_runtime()?;
                 let query = args
                     .get("query")
                     .and_then(|v| v.as_str())
                     .ok_or("Missing query")?;
+                let max_results = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as u32;
+                let model = args
+                    .get("model")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("grok-4");
+                let http = reqwest::Client::new();
+                let (results, summary) =
+                    xai::x_search(&http, &api_key, query, max_results, None, None, model, 45)
+                        .await
+                        .map_err(|e| format!("x_search failed: {e}"))?;
 
-                Ok(vec![MCPContent {
-                    content_type: "text".to_string(),
-                    text: format!("X-Search: {query}"),
-                }])
+                json_content(serde_json::json!({
+                    "type": "success",
+                    "message": "x_search completed.",
+                    "data": {
+                        "query": query,
+                        "model": model,
+                        "result_count": results.len(),
+                        "summary": summary,
+                        "results": results
+                    }
+                }))
             }
-            "xint_collections_list" => Ok(vec![MCPContent {
+            McpToolRoute::CollectionsList => Ok(vec![MCPContent {
                 content_type: "text".to_string(),
-                text: "Collections: []".to_string(),
+                text: serde_json::to_string_pretty(&{
+                    let result =
+                        xai::collections_list(&reqwest::Client::new(), &xai_management_runtime()?)
+                            .await
+                            .map_err(|e| format!("collections list failed: {e}"))?;
+                    serde_json::json!({
+                        "type": "success",
+                        "message": "Collections list fetched.",
+                        "data": result
+                    })
+                })
+                .map_err(|e| format!("Failed to encode collections list payload: {e}"))?,
             }]),
-            "xint_analyze" => {
+            McpToolRoute::Analyze => {
+                let api_key = xai_runtime()?;
                 let query = args
                     .get("query")
                     .and_then(|v| v.as_str())
                     .ok_or("Missing query")?;
+                let model = args
+                    .get("model")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("grok-3-mini")
+                    .to_string();
+                let opts = crate::models::GrokOpts {
+                    model: model.clone(),
+                    ..Default::default()
+                };
+                let http = reqwest::Client::new();
 
-                Ok(vec![MCPContent {
-                    content_type: "text".to_string(),
-                    text: format!("Analysis: {query}"),
-                }])
+                let response = if let Some(tweets_raw) = args.get("tweets") {
+                    let tweets: Vec<Tweet> = serde_json::from_value(tweets_raw.clone())
+                        .map_err(|e| format!("Invalid tweets payload for analyze: {e}"))?;
+                    grok::analyze_tweets(&http, &api_key, &tweets, Some(query), &opts)
+                        .await
+                        .map_err(|e| format!("Analyze tweets failed: {e}"))?
+                } else {
+                    grok::analyze_query(&http, &api_key, query, None, &opts)
+                        .await
+                        .map_err(|e| format!("Analyze query failed: {e}"))?
+                };
+
+                json_content(serde_json::json!({
+                    "type": "success",
+                    "message": "Analysis completed.",
+                    "data": {
+                        "model": response.model,
+                        "content": response.content,
+                        "usage": response.usage
+                    }
+                }))
             }
-            "xint_article" => {
+            McpToolRoute::Article => {
                 let url = args
                     .get("url")
                     .and_then(|v| v.as_str())
                     .ok_or("Missing url")?;
-
-                Ok(vec![MCPContent {
-                    content_type: "text".to_string(),
-                    text: format!("Article: {url}"),
-                }])
+                json_content(serde_json::json!({
+                    "type": "success",
+                    "message": "Article route acknowledged.",
+                    "data": {
+                        "url": url,
+                        "note": "Use CLI article command for full web/article extraction output."
+                    }
+                }))
             }
-            "xint_collections_search" => {
+            McpToolRoute::CollectionsSearch => {
+                let api_key = xai_runtime()?;
                 let collection_id = args
                     .get("collection_id")
+                    .or_else(|| args.get("collectionId"))
                     .and_then(|v| v.as_str())
-                    .ok_or("Missing collection_id")?;
+                    .ok_or("Missing collection_id or collectionId")?;
                 let query = args
                     .get("query")
                     .and_then(|v| v.as_str())
                     .ok_or("Missing query")?;
-
-                Ok(vec![MCPContent {
-                    content_type: "text".to_string(),
-                    text: format!("Collections search in {collection_id}: {query}"),
-                }])
-            }
-            "xint_bookmarks" => Ok(vec![MCPContent {
-                content_type: "text".to_string(),
-                text: "Bookmarks: OAuth required".to_string(),
-            }]),
-            "xint_package_create" => Ok(vec![MCPContent {
-                content_type: "text".to_string(),
-                text: serde_json::to_string_pretty(
-                    &self
-                        .call_package_api(
-                            reqwest::Method::POST,
-                            "/packages",
-                            Some(serde_json::json!({
-                                "name": args.get("name").and_then(|v| v.as_str()).unwrap_or(""),
-                                "topic_query": args
-                                    .get("topic_query")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or(""),
-                                "sources": args
-                                    .get("sources")
-                                    .and_then(|v| v.as_array())
-                                    .cloned()
-                                    .unwrap_or_default(),
-                                "time_window": args.get("time_window").cloned().unwrap_or_else(|| {
-                                    serde_json::json!({
-                                        "from": chrono::Utc::now()
-                                            .checked_sub_signed(chrono::Duration::days(1))
-                                            .unwrap_or_else(chrono::Utc::now)
-                                            .to_rfc3339(),
-                                        "to": chrono::Utc::now().to_rfc3339()
-                                    })
-                                }),
-                                "policy": args
-                                    .get("policy")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("private"),
-                                "analysis_profile": args
-                                    .get("analysis_profile")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("summary")
-                            })),
-                        )
-                        .await?,
+                let top_k = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(8) as u32;
+                let http = reqwest::Client::new();
+                let result = xai::documents_search(
+                    &http,
+                    &api_key,
+                    &[collection_id.to_string()],
+                    query,
+                    top_k,
                 )
-                .unwrap_or_else(|_| "{}".to_string()),
-            }]),
-            "xint_package_status" => {
+                .await
+                .map_err(|e| format!("Collections search failed: {e}"))?;
+
+                json_content(serde_json::json!({
+                    "type": "success",
+                    "message": "Collections search completed.",
+                    "data": result
+                }))
+            }
+            McpToolRoute::Bookmarks => json_content(serde_json::json!({
+                "type": "info",
+                "message": "Bookmarks requires OAuth user context.",
+                "data": {
+                    "note": "Use xint bookmarks command for full OAuth flow and caching behavior."
+                }
+            })),
+            McpToolRoute::PackageCreate => {
+                let payload = serde_json::json!({
+                    "name": args.get("name").and_then(|v| v.as_str()).unwrap_or(""),
+                    "topic_query": args
+                        .get("topic_query")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(""),
+                    "sources": args
+                        .get("sources")
+                        .and_then(|v| v.as_array())
+                        .cloned()
+                        .unwrap_or_default(),
+                    "time_window": args.get("time_window").cloned().unwrap_or_else(|| {
+                        serde_json::json!({
+                            "from": chrono::Utc::now()
+                                .checked_sub_signed(chrono::Duration::days(1))
+                                .unwrap_or_else(chrono::Utc::now)
+                                .to_rfc3339(),
+                            "to": chrono::Utc::now().to_rfc3339()
+                        })
+                    }),
+                    "policy": args
+                        .get("policy")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("private"),
+                    "analysis_profile": args
+                        .get("analysis_profile")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("summary")
+                });
+                let result = self
+                    .call_package_api(reqwest::Method::POST, "/packages", Some(payload))
+                    .await?;
+                json_content(serde_json::json!({
+                    "type": "success",
+                    "message": "Package create request accepted.",
+                    "data": result
+                }))
+            }
+            McpToolRoute::PackageStatus => {
                 let package_id = args
                     .get("package_id")
                     .and_then(|v| v.as_str())
@@ -917,13 +1367,13 @@ impl MCPServer {
                         None,
                     )
                     .await?;
-                Ok(vec![MCPContent {
-                    content_type: "text".to_string(),
-                    text: serde_json::to_string_pretty(&result)
-                        .unwrap_or_else(|_| result.to_string()),
-                }])
+                json_content(serde_json::json!({
+                    "type": "success",
+                    "message": "Package status fetched.",
+                    "data": result
+                }))
             }
-            "xint_package_query" => {
+            McpToolRoute::PackageQuery => {
                 let query = args
                     .get("query")
                     .and_then(|v| v.as_str())
@@ -950,13 +1400,13 @@ impl MCPServer {
                     .call_package_api(reqwest::Method::POST, "/query", Some(payload))
                     .await?;
                 self.ensure_package_query_citations(&result, require_citations)?;
-                Ok(vec![MCPContent {
-                    content_type: "text".to_string(),
-                    text: serde_json::to_string_pretty(&result)
-                        .unwrap_or_else(|_| result.to_string()),
-                }])
+                json_content(serde_json::json!({
+                    "type": "success",
+                    "message": "Package query completed.",
+                    "data": result
+                }))
             }
-            "xint_package_refresh" => {
+            McpToolRoute::PackageRefresh => {
                 let package_id = args
                     .get("package_id")
                     .and_then(|v| v.as_str())
@@ -972,13 +1422,13 @@ impl MCPServer {
                         Some(serde_json::json!({ "reason": reason })),
                     )
                     .await?;
-                Ok(vec![MCPContent {
-                    content_type: "text".to_string(),
-                    text: serde_json::to_string_pretty(&result)
-                        .unwrap_or_else(|_| result.to_string()),
-                }])
+                json_content(serde_json::json!({
+                    "type": "success",
+                    "message": "Package refresh requested.",
+                    "data": result
+                }))
             }
-            "xint_package_search" => {
+            McpToolRoute::PackageSearch => {
                 let query = args
                     .get("query")
                     .and_then(|v| v.as_str())
@@ -989,13 +1439,13 @@ impl MCPServer {
                 let result = self
                     .call_package_api(reqwest::Method::GET, &path, None)
                     .await?;
-                Ok(vec![MCPContent {
-                    content_type: "text".to_string(),
-                    text: serde_json::to_string_pretty(&result)
-                        .unwrap_or_else(|_| result.to_string()),
-                }])
+                json_content(serde_json::json!({
+                    "type": "success",
+                    "message": "Package search completed.",
+                    "data": result
+                }))
             }
-            "xint_package_publish" => {
+            McpToolRoute::PackagePublish => {
                 let package_id = args
                     .get("package_id")
                     .and_then(|v| v.as_str())
@@ -1011,61 +1461,244 @@ impl MCPServer {
                         Some(serde_json::json!({ "snapshot_version": snapshot_version })),
                     )
                     .await?;
-                Ok(vec![MCPContent {
-                    content_type: "text".to_string(),
-                    text: serde_json::to_string_pretty(&result)
-                        .unwrap_or_else(|_| result.to_string()),
-                }])
+                json_content(serde_json::json!({
+                    "type": "success",
+                    "message": "Package publish requested.",
+                    "data": result
+                }))
             }
-            "xint_cache_clear" => Ok(vec![MCPContent {
-                content_type: "text".to_string(),
-                text: "Cache cleared".to_string(),
-            }]),
-            "xint_watch" => {
+            McpToolRoute::CacheClear => {
+                let runtime_config =
+                    Config::load().map_err(|e| format!("Failed to load config: {e}"))?;
+                let cleared = cache::clear(&runtime_config.cache_dir());
+                json_content(serde_json::json!({
+                    "type": "success",
+                    "message": "Cache cleared.",
+                    "data": {
+                        "cleared": cleared
+                    }
+                }))
+            }
+            McpToolRoute::Watch => {
+                let (client, token) = bearer_runtime()?;
                 let query = args
                     .get("query")
                     .and_then(|v| v.as_str())
                     .ok_or("Missing query")?;
-                Ok(vec![MCPContent {
-                    content_type: "text".to_string(),
-                    text: format!("Watch: {query} (use CLI for real-time monitoring)"),
-                }])
+                let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
+                let since = args.get("since").and_then(|v| v.as_str()).unwrap_or("1h");
+                let search_query = if query.starts_with('@') && !query.contains(' ') {
+                    format!("from:{} -is:retweet", query.trim_start_matches('@'))
+                } else if query.contains("is:retweet") {
+                    query.to_string()
+                } else {
+                    format!("{query} -is:retweet")
+                };
+
+                let tweets = twitter::search(
+                    &client,
+                    &token,
+                    &search_query,
+                    1,
+                    "recency",
+                    Some(since),
+                    None,
+                    false,
+                )
+                .await
+                .map_err(|e| format!("Watch probe failed: {e}"))?;
+                let shown: Vec<_> = tweets.into_iter().take(limit.max(1)).collect();
+                costs::track_cost(
+                    &self.costs_path,
+                    "search",
+                    "/2/tweets/search/recent",
+                    shown.len() as u64,
+                );
+
+                json_content(serde_json::json!({
+                    "type": "success",
+                    "message": "Watch probe completed.",
+                    "data": {
+                        "query": search_query,
+                        "since": since,
+                        "continuous_mode": false,
+                        "hint": "Use CLI watch command for continuous polling and webhooks.",
+                        "tweets": shown
+                    }
+                }))
             }
-            "xint_diff" => {
+            McpToolRoute::Diff => {
+                let (client, access_token) = oauth_runtime().await?;
                 let username = args
                     .get("username")
                     .and_then(|v| v.as_str())
                     .ok_or("Missing username")?;
-                Ok(vec![MCPContent {
-                    content_type: "text".to_string(),
-                    text: format!("Diff tracking for @{username}"),
-                }])
+                let normalized = username.trim_start_matches('@');
+                let following = bool_arg(&args, "following", "following");
+                let snap_type = if following { "following" } else { "followers" };
+                let pages = args.get("pages").and_then(|v| v.as_u64()).unwrap_or(5) as u32;
+
+                let lookup_path =
+                    format!("users/by/username/{normalized}?user.fields=public_metrics");
+                let lookup = client
+                    .oauth_get(&lookup_path, &access_token)
+                    .await
+                    .map_err(|e| format!("Failed to resolve @{normalized}: {e}"))?;
+                let user_id = lookup
+                    .data
+                    .as_ref()
+                    .and_then(|d| d.get("id"))
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| format!("User @{normalized} not found"))?
+                    .to_string();
+
+                let mut users = Vec::<serde_json::Value>::new();
+                let mut next_token: Option<String> = None;
+                for page_idx in 0..pages {
+                    let pagination = match &next_token {
+                        Some(t) => format!("&pagination_token={t}"),
+                        None => String::new(),
+                    };
+                    let path = format!(
+                        "users/{user_id}/{snap_type}?max_results=1000&user.fields=public_metrics,username,name{pagination}"
+                    );
+                    let raw = client
+                        .oauth_get(&path, &access_token)
+                        .await
+                        .map_err(|e| format!("Failed to fetch {snap_type}: {e}"))?;
+                    if let Some(data) = &raw.data {
+                        if let Some(arr) = data.as_array() {
+                            users.extend(arr.iter().cloned());
+                        }
+                    }
+                    next_token = raw.meta.and_then(|m| m.next_token);
+                    if next_token.is_none() {
+                        break;
+                    }
+                    if page_idx + 1 < pages {
+                        crate::client::rate_delay().await;
+                    }
+                }
+
+                costs::track_cost(
+                    &self.costs_path,
+                    snap_type,
+                    &format!("/2/users/{user_id}/{snap_type}"),
+                    users.len() as u64,
+                );
+
+                json_content(serde_json::json!({
+                    "type": "success",
+                    "message": "Diff snapshot fetched.",
+                    "data": {
+                        "username": normalized,
+                        "mode": snap_type,
+                        "count": users.len(),
+                        "users": users,
+                        "note": "Use CLI diff command for snapshot history and delta computation."
+                    }
+                }))
             }
-            "xint_report" => {
+            McpToolRoute::Report => {
+                let (client, token) = bearer_runtime()?;
                 let topic = args
                     .get("topic")
+                    .or_else(|| args.get("query"))
                     .and_then(|v| v.as_str())
-                    .ok_or("Missing topic")?;
-                Ok(vec![MCPContent {
-                    content_type: "text".to_string(),
-                    text: format!("Report on: {topic} (requires XAI_API_KEY)"),
-                }])
+                    .ok_or("Missing topic or query")?;
+                let pages = args.get("pages").and_then(|v| v.as_u64()).unwrap_or(2) as u32;
+                let tweets = twitter::search(
+                    &client,
+                    &token,
+                    topic,
+                    pages.min(5),
+                    "relevancy",
+                    Some("1d"),
+                    None,
+                    false,
+                )
+                .await
+                .map_err(|e| format!("Report search failed: {e}"))?;
+
+                costs::track_cost(
+                    &self.costs_path,
+                    "search",
+                    "/2/tweets/search/recent",
+                    tweets.len() as u64,
+                );
+
+                let mut top_tweets = tweets.clone();
+                twitter::sort_by(&mut top_tweets, "likes");
+                top_tweets.truncate(10);
+
+                json_content(serde_json::json!({
+                    "type": "success",
+                    "message": "Report data prepared.",
+                    "data": {
+                        "topic": topic,
+                        "generated_at": chrono::Utc::now().to_rfc3339(),
+                        "tweet_count": tweets.len(),
+                        "top_tweets": top_tweets,
+                        "ai_summary": serde_json::Value::Null,
+                        "note": "MCP report currently returns source data only; use CLI report for AI narrative output."
+                    }
+                }))
             }
-            "xint_sentiment" => Ok(vec![MCPContent {
+            McpToolRoute::Sentiment => Ok(vec![MCPContent {
                 content_type: "text".to_string(),
-                text: "Sentiment analysis (requires XAI_API_KEY)".to_string(),
+                text: {
+                    let api_key = xai_runtime()?;
+                    let tweets_raw = args
+                        .get("tweets")
+                        .ok_or("Missing tweets array for sentiment analysis")?;
+                    let tweets: Vec<Tweet> = serde_json::from_value(tweets_raw.clone())
+                        .map_err(|e| format!("Invalid tweets payload for sentiment: {e}"))?;
+                    let model = args.get("model").and_then(|v| v.as_str());
+                    let http = reqwest::Client::new();
+                    let results = sentiment::analyze_sentiment(&http, &api_key, &tweets, model)
+                        .await
+                        .map_err(|e| format!("Sentiment analysis failed: {e}"))?;
+                    let stats = sentiment::compute_stats(&results);
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "type": "success",
+                        "message": "Sentiment analysis completed.",
+                        "data": {
+                            "results": results,
+                            "stats": {
+                                "positive": stats.positive,
+                                "negative": stats.negative,
+                                "neutral": stats.neutral,
+                                "mixed": stats.mixed,
+                                "average_score": stats.average_score
+                            }
+                        }
+                    }))
+                    .map_err(|e| format!("Failed to encode sentiment payload: {e}"))?
+                },
             }]),
-            "xint_costs" => {
+            McpToolRoute::Costs => {
                 let period = args
                     .get("period")
                     .and_then(|v| v.as_str())
                     .unwrap_or("today");
-                Ok(vec![MCPContent {
-                    content_type: "text".to_string(),
-                    text: format!("Cost tracking for period: {period}"),
-                }])
+                let summary = costs::get_cost_summary(&self.costs_path, period);
+                let budget = costs::check_budget(&self.costs_path);
+                json_content(serde_json::json!({
+                    "type": "success",
+                    "message": "Cost summary generated.",
+                    "data": {
+                        "period": period,
+                        "summary": summary,
+                        "budget": {
+                            "allowed": budget.allowed,
+                            "spent": budget.spent,
+                            "limit": budget.limit,
+                            "remaining": budget.remaining,
+                            "warning": budget.warning
+                        }
+                    }
+                }))
             }
-            _ => Err(format!("Unknown tool: {name}")),
         }
     }
 
@@ -1350,5 +1983,89 @@ mod tests {
         assert!(err.contains("missing citations"));
 
         restore_env("XINT_PACKAGE_API_BASE_URL", prev_base);
+    }
+
+    #[tokio::test]
+    async fn costs_tool_returns_success_payload_without_network() {
+        let server = MCPServer::new(
+            PolicyMode::ReadOnly,
+            false,
+            PathBuf::from("/tmp/xint-rs-test-costs.json"),
+            PathBuf::from("/tmp/xint-rs-test-reliability.json"),
+        );
+
+        let result = server
+            .execute_tool("xint_costs", serde_json::json!({ "period": "today" }))
+            .await
+            .expect("costs tool call");
+
+        assert!(result[0].text.contains("\"type\": \"success\""));
+        assert!(result[0].text.contains("\"period\": \"today\""));
+    }
+
+    #[tokio::test]
+    async fn cache_clear_tool_returns_success_payload() {
+        let server = MCPServer::new(
+            PolicyMode::ReadOnly,
+            false,
+            PathBuf::from("/tmp/xint-rs-test-costs.json"),
+            PathBuf::from("/tmp/xint-rs-test-reliability.json"),
+        );
+
+        let result = server
+            .execute_tool("xint_cache_clear", serde_json::json!({}))
+            .await
+            .expect("cache clear tool call");
+
+        assert!(result[0].text.contains("\"type\": \"success\""));
+        assert!(result[0].text.contains("\"message\": \"Cache cleared.\""));
+        assert!(result[0].text.contains("\"cleared\""));
+    }
+
+    #[tokio::test]
+    async fn core_search_tool_requires_bearer_token() {
+        let _guard = env_lock().lock().expect("env lock");
+        let prev_bearer = save_env("X_BEARER_TOKEN");
+        env::remove_var("X_BEARER_TOKEN");
+
+        let server = MCPServer::new(
+            PolicyMode::ReadOnly,
+            false,
+            PathBuf::from("/tmp/xint-rs-test-costs.json"),
+            PathBuf::from("/tmp/xint-rs-test-reliability.json"),
+        );
+
+        let err = server
+            .execute_tool("xint_search", serde_json::json!({ "query": "ai agents" }))
+            .await
+            .expect_err("expected bearer token error");
+
+        assert!(err.contains("X_BEARER_TOKEN"));
+        restore_env("X_BEARER_TOKEN", prev_bearer);
+    }
+
+    #[tokio::test]
+    async fn analyze_tool_requires_xai_api_key() {
+        let _guard = env_lock().lock().expect("env lock");
+        let prev_key = save_env("XAI_API_KEY");
+        env::remove_var("XAI_API_KEY");
+
+        let server = MCPServer::new(
+            PolicyMode::ReadOnly,
+            false,
+            PathBuf::from("/tmp/xint-rs-test-costs.json"),
+            PathBuf::from("/tmp/xint-rs-test-reliability.json"),
+        );
+
+        let err = server
+            .execute_tool(
+                "xint_analyze",
+                serde_json::json!({ "query": "summarize this" }),
+            )
+            .await
+            .expect_err("expected xai key error");
+
+        assert!(err.contains("XAI_API_KEY"));
+        restore_env("XAI_API_KEY", prev_key);
     }
 }

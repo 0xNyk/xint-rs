@@ -281,14 +281,14 @@ impl Default for GrokOpts {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GrokResponse {
     pub content: String,
     pub model: String,
     pub usage: GrokUsage,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GrokUsage {
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
