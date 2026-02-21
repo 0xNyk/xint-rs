@@ -1,17 +1,11 @@
 name: Release Drafter
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-    types:
-      - closed
+  workflow_dispatch:
 
 jobs:
   update_release_draft:
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.merged_at != null)
     steps:
       - uses: release-drafter/release-drafter@v6
         with:

@@ -1,4 +1,5 @@
 use std::cmp::max;
+use std::fs;
 use std::io::{self, BufRead, BufReader, IsTerminal, Write};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -6,10 +7,11 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
-use crossterm::cursor::MoveTo;
+use crossterm::cursor::{Hide, MoveTo, Show};
 use crossterm::event::{self, Event, KeyCode};
 use crossterm::execute;
-use crossterm::terminal::{self, Clear, ClearType};
+use crossterm::terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen};
+use serde_json::Value;
 
 use crate::cli::{PolicyMode, TuiArgs};
 use crate::commands::actions::{
@@ -74,10 +76,46 @@ struct UiState {
 }
 
 struct Theme {
-    accent: &'static str,
-    border: &'static str,
-    muted: &'static str,
-    reset: &'static str,
+    accent: String,
+    border: String,
+    muted: String,
+    hero: String,
+    reset: String,
+}
+
+struct TerminalUiGuard {
+    active: bool,
+}
+
+impl TerminalUiGuard {
+    fn enter_if_tty() -> Result<Self> {
+        if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+            return Ok(Self { active: false });
+        }
+
+        terminal::enable_raw_mode()?;
+        let mut stdout = io::stdout();
+        execute!(
+            stdout,
+            EnterAlternateScreen,
+            Hide,
+            Clear(ClearType::All),
+            MoveTo(0, 0)
+        )?;
+        Ok(Self { active: true })
+    }
+}
+
+impl Drop for TerminalUiGuard {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+
+        let mut stdout = io::stdout();
+        let _ = execute!(stdout, Show, LeaveAlternateScreen);
+        let _ = terminal::disable_raw_mode();
+    }
 }
 
 const HELP_LINES: &[&str] = &[
@@ -93,30 +131,75 @@ const HELP_LINES: &[&str] = &[
 ];
 
 fn active_theme() -> Theme {
-    match std::env::var("XINT_TUI_THEME")
+    let mut theme = match std::env::var("XINT_TUI_THEME")
         .unwrap_or_else(|_| "classic".to_string())
         .to_lowercase()
         .as_str()
     {
         "minimal" => Theme {
-            accent: "\x1b[1m",
-            border: "",
-            muted: "",
-            reset: "\x1b[0m",
+            accent: "\x1b[1m".to_string(),
+            border: "".to_string(),
+            muted: "".to_string(),
+            hero: "\x1b[1m".to_string(),
+            reset: "\x1b[0m".to_string(),
+        },
+        "ocean" => Theme {
+            accent: "\x1b[1;96m".to_string(),
+            border: "\x1b[38;5;39m".to_string(),
+            muted: "\x1b[38;5;244m".to_string(),
+            hero: "\x1b[1;94m".to_string(),
+            reset: "\x1b[0m".to_string(),
+        },
+        "amber" => Theme {
+            accent: "\x1b[1;33m".to_string(),
+            border: "\x1b[38;5;214m".to_string(),
+            muted: "\x1b[38;5;244m".to_string(),
+            hero: "\x1b[1;33m".to_string(),
+            reset: "\x1b[0m".to_string(),
         },
         "neon" => Theme {
-            accent: "\x1b[1;95m",
-            border: "\x1b[38;5;45m",
-            muted: "\x1b[38;5;244m",
-            reset: "\x1b[0m",
+            accent: "\x1b[1;95m".to_string(),
+            border: "\x1b[38;5;45m".to_string(),
+            muted: "\x1b[38;5;244m".to_string(),
+            hero: "\x1b[1;92m".to_string(),
+            reset: "\x1b[0m".to_string(),
         },
         _ => Theme {
-            accent: "\x1b[1;36m",
-            border: "\x1b[2m",
-            muted: "\x1b[2m",
-            reset: "\x1b[0m",
+            accent: "\x1b[1;36m".to_string(),
+            border: "\x1b[2m".to_string(),
+            muted: "\x1b[2m".to_string(),
+            hero: "\x1b[1;34m".to_string(),
+            reset: "\x1b[0m".to_string(),
         },
+    };
+
+    if let Ok(path) = std::env::var("XINT_TUI_THEME_FILE") {
+        if let Ok(raw) = fs::read_to_string(path) {
+            if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(&raw) {
+                if let Some(Value::String(v)) = map.get("accent") {
+                    theme.accent = v.clone();
+                }
+                if let Some(Value::String(v)) = map.get("border") {
+                    theme.border = v.clone();
+                }
+                if let Some(Value::String(v)) = map.get("muted") {
+                    theme.muted = v.clone();
+                }
+                if let Some(Value::String(v)) = map.get("hero") {
+                    theme.hero = v.clone();
+                }
+                if let Some(Value::String(v)) = map.get("reset") {
+                    theme.reset = v.clone();
+                }
+            }
+        }
     }
+
+    theme
+}
+
+fn is_hero_enabled() -> bool {
+    std::env::var("XINT_TUI_HERO").as_deref() != Ok("0")
 }
 
 fn prompt_line(label: &str) -> Result<String> {
@@ -150,24 +233,17 @@ fn prompt_with_default_dashboard(
         return prompt_with_default(label, previous);
     }
 
-    struct RawModeGuard;
-    impl Drop for RawModeGuard {
-        fn drop(&mut self) {
-            let _ = terminal::disable_raw_mode();
-        }
-    }
-
-    terminal::enable_raw_mode()?;
-    let _raw_mode_guard = RawModeGuard;
-
     ui_state.tab = DashboardTab::Output;
     ui_state.inline_prompt_label = Some(label.to_string());
     ui_state.inline_prompt_value.clear();
     render_dashboard(ui_state, session)?;
 
     let value = loop {
-        if let Event::Key(key_event) = event::read()? {
-            match key_event.code {
+        match event::read()? {
+            Event::Resize(_, _) => {
+                render_dashboard(ui_state, session)?;
+            }
+            Event::Key(key_event) => match key_event.code {
                 KeyCode::Enter => break ui_state.inline_prompt_value.clone(),
                 KeyCode::Esc => break String::new(),
                 KeyCode::Backspace => {
@@ -185,7 +261,8 @@ fn prompt_with_default_dashboard(
                     }
                 }
                 _ => {}
-            }
+            },
+            _ => {}
         }
     };
 
@@ -252,8 +329,115 @@ fn pad_text(value: &str, width: usize) -> String {
     }
 }
 
+fn build_tabs(ui_state: &UiState) -> String {
+    [
+        DashboardTab::Commands,
+        DashboardTab::Output,
+        DashboardTab::Help,
+    ]
+    .iter()
+    .enumerate()
+    .map(|(index, tab)| {
+        let label = format!("{}:{}", index + 1, tab.label());
+        if matches!(
+            (tab, ui_state.tab),
+            (DashboardTab::Commands, DashboardTab::Commands)
+                | (DashboardTab::Output, DashboardTab::Output)
+                | (DashboardTab::Help, DashboardTab::Help)
+        ) {
+            format!("‹{label}›")
+        } else {
+            format!("[{label}]")
+        }
+    })
+    .collect::<Vec<_>>()
+    .join(" ")
+}
+
+fn build_header_tracker(ui_state: &UiState, width: usize) -> String {
+    let rail_width = width.clamp(8, 18);
+    let cursor_basis = if ui_state.inline_prompt_label.is_some() {
+        ui_state.inline_prompt_value.chars().count()
+    } else {
+        ui_state.active_index.saturating_mul(4) + ui_state.output_offset
+    };
+    let pos = cursor_basis % rail_width;
+    let left = "·".repeat(pos);
+    let right = "·".repeat(rail_width.saturating_sub(pos + 1));
+    format!("focus {left}●{right}")
+}
+
+fn build_hero_line(ui_state: &UiState, session: &SessionState, width: usize) -> String {
+    let phase = resolve_ui_phase(session, ui_state);
+    let running_palette = ["▁", "▂", "▃", "▄", "▅", "▆", "▇"];
+    let idle_palette = ["·", "•", "·", "•", "·"];
+    let palette = if matches!(phase, UiPhase::Running) {
+        &running_palette[..]
+    } else {
+        &idle_palette[..]
+    };
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as usize)
+        .unwrap_or(0);
+    let tick = millis / 110;
+    let wave = (0..12)
+        .map(|i| palette[(tick + i) % palette.len()])
+        .collect::<Vec<_>>()
+        .join("");
+    pad_text(&format!(" xint intelligence console  {wave}"), width)
+}
+
+#[allow(clippy::while_let_on_iterator)]
+fn sanitize_output_line(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut chars = raw.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' {
+            if let Some('[') = chars.peek().copied() {
+                let _ = chars.next();
+                while let Some(next) = chars.next() {
+                    if ('@'..='~').contains(&next) {
+                        break;
+                    }
+                }
+                continue;
+            }
+            if let Some(']') = chars.peek().copied() {
+                let _ = chars.next();
+                while let Some(next) = chars.next() {
+                    if next == '\u{07}' {
+                        break;
+                    }
+                    if next == '\u{1b}' && chars.peek().copied() == Some('\\') {
+                        let _ = chars.next();
+                        break;
+                    }
+                }
+                continue;
+            }
+            continue;
+        }
+
+        if ch == '\n' || ch == '\t' || !ch.is_control() {
+            out.push(ch);
+        }
+    }
+    out
+}
+
 fn build_menu_lines(active_index: usize) -> Vec<String> {
     let mut lines = vec!["Menu".to_string(), String::new()];
+
+    let icon_for_action = |key: &str| match key {
+        "1" => "⌕ ",
+        "2" => "◍ ",
+        "3" => "◉ ",
+        "4" => "↳ ",
+        "5" => "✦ ",
+        "6" => "? ",
+        _ => "",
+    };
 
     for (index, option) in INTERACTIVE_ACTIONS.iter().enumerate() {
         let pointer = if index == active_index { ">" } else { " " };
@@ -263,8 +447,10 @@ fn build_menu_lines(active_index: usize) -> Vec<String> {
             format!(" ({})", option.aliases.join(", "))
         };
         lines.push(format!(
-            "{pointer} {}) {}{aliases}",
-            option.key, option.label
+            "{pointer} {}) {}{}{aliases}",
+            option.key,
+            icon_for_action(option.key),
+            option.label
         ));
         lines.push(format!("    {}", option.hint));
     }
@@ -446,7 +632,10 @@ fn render_double_pane(
     rows: usize,
 ) -> Result<()> {
     let theme = active_theme();
-    let total_rows = max(12usize, rows.saturating_sub(8));
+    let total_rows = max(
+        12usize,
+        rows.saturating_sub(if is_hero_enabled() { 10 } else { 9 }),
+    );
     let left_box_width = max(46usize, (cols * 45) / 100);
     let right_box_width = max(30usize, cols.saturating_sub(left_box_width + 1));
     let left_inner = max(20usize, left_box_width.saturating_sub(2));
@@ -458,28 +647,8 @@ fn render_double_pane(
         right_lines = right_lines[right_lines.len() - total_rows..].to_vec();
     }
 
-    let tabs = [
-        DashboardTab::Commands,
-        DashboardTab::Output,
-        DashboardTab::Help,
-    ]
-    .iter()
-    .enumerate()
-    .map(|(index, tab)| {
-        let label = format!("{}:{}", index + 1, tab.label());
-        if matches!(
-            (tab, ui_state.tab),
-            (DashboardTab::Commands, DashboardTab::Commands)
-                | (DashboardTab::Output, DashboardTab::Output)
-                | (DashboardTab::Help, DashboardTab::Help)
-        ) {
-            format!("{}[ {} ]{}", theme.accent, label, theme.reset)
-        } else {
-            format!("[ {} ]", label)
-        }
-    })
-    .collect::<Vec<_>>()
-    .join(" ");
+    let tabs = build_tabs(ui_state);
+    let tracker = build_header_tracker(ui_state, 16);
 
     let mut stdout = io::stdout();
     execute!(stdout, Clear(ClearType::All), MoveTo(0, 0))?;
@@ -491,6 +660,18 @@ fn render_double_pane(
         "-".repeat(cols.saturating_sub(2)),
         theme.reset
     )?;
+    if is_hero_enabled() {
+        writeln!(
+            stdout,
+            "{}|{}{}{}{}|{}",
+            theme.border,
+            theme.reset,
+            theme.hero,
+            build_hero_line(ui_state, session, cols.saturating_sub(2)),
+            theme.reset,
+            theme.border
+        )?;
+    }
     writeln!(
         stdout,
         "{}|{}{}{}|{}",
@@ -499,6 +680,16 @@ fn render_double_pane(
         pad_text(&format!(" xint dashboard {}", tabs), cols.saturating_sub(2)),
         theme.border,
         theme.reset
+    )?;
+    writeln!(
+        stdout,
+        "{}|{}{}{}{}|{}",
+        theme.border,
+        theme.reset,
+        theme.accent,
+        pad_text(&format!(" {tracker}"), cols.saturating_sub(2)),
+        theme.reset,
+        theme.border
     )?;
     writeln!(
         stdout,
@@ -555,7 +746,8 @@ fn render_double_pane(
         theme.border
     )?;
 
-    let footer = " Up/Down Navigate | Enter Run | Tab Tabs | F Search Output | PgUp/PgDn Scroll | / Palette | q Quit ";
+    let footer =
+        " ↑↓ Move • Enter Run • Tab Views • f Filter • / Palette • PgUp/PgDn Scroll • q Quit ";
     writeln!(
         stdout,
         "{}|{}{}{}|{}",
@@ -585,30 +777,13 @@ fn render_single_pane(
 ) -> Result<()> {
     let theme = active_theme();
     let width = max(30usize, cols.saturating_sub(2));
-    let total_rows = max(10usize, rows.saturating_sub(7));
+    let total_rows = max(
+        10usize,
+        rows.saturating_sub(if is_hero_enabled() { 9 } else { 8 }),
+    );
 
-    let tabs = [
-        DashboardTab::Commands,
-        DashboardTab::Output,
-        DashboardTab::Help,
-    ]
-    .iter()
-    .enumerate()
-    .map(|(index, tab)| {
-        let label = format!("{}:{}", index + 1, tab.label());
-        if matches!(
-            (tab, ui_state.tab),
-            (DashboardTab::Commands, DashboardTab::Commands)
-                | (DashboardTab::Output, DashboardTab::Output)
-                | (DashboardTab::Help, DashboardTab::Help)
-        ) {
-            format!("{}[ {} ]{}", theme.accent, label, theme.reset)
-        } else {
-            format!("[ {} ]", label)
-        }
-    })
-    .collect::<Vec<_>>()
-    .join(" ");
+    let tabs = build_tabs(ui_state);
+    let tracker = build_header_tracker(ui_state, 16);
 
     let lines = if matches!(ui_state.tab, DashboardTab::Commands) {
         let mut merged = build_menu_lines(ui_state.active_index);
@@ -629,6 +804,18 @@ fn render_single_pane(
         "-".repeat(width),
         theme.reset
     )?;
+    if is_hero_enabled() {
+        writeln!(
+            stdout,
+            "{}|{}{}{}{}|{}",
+            theme.border,
+            theme.reset,
+            theme.hero,
+            build_hero_line(ui_state, session, width),
+            theme.reset,
+            theme.border
+        )?;
+    }
     writeln!(
         stdout,
         "{}|{}{}{}|{}",
@@ -637,6 +824,16 @@ fn render_single_pane(
         pad_text(&format!(" xint dashboard {}", tabs), width),
         theme.border,
         theme.reset
+    )?;
+    writeln!(
+        stdout,
+        "{}|{}{}{}{}|{}",
+        theme.border,
+        theme.reset,
+        theme.accent,
+        pad_text(&format!(" {tracker}"), width),
+        theme.reset,
+        theme.border
     )?;
     writeln!(
         stdout,
@@ -699,7 +896,7 @@ fn render_single_pane(
         theme.reset,
         theme.border
     )?;
-    let footer = " Tab Tabs | F Search Output | PgUp/PgDn Scroll | / Palette | q Quit ";
+    let footer = " Enter Run • Tab Views • f Filter • / Palette • PgUp/PgDn • q Quit ";
     writeln!(
         stdout,
         "{}|{}{}{}|{}",
@@ -748,21 +945,14 @@ fn select_option_interactive(session: &mut SessionState, ui_state: &mut UiState)
         print_menu();
         return prompt_line("\nSelect option (number or alias): ");
     }
-
-    struct RawModeGuard;
-    impl Drop for RawModeGuard {
-        fn drop(&mut self) {
-            let _ = terminal::disable_raw_mode();
-        }
-    }
-
-    terminal::enable_raw_mode()?;
-    let _raw_mode_guard = RawModeGuard;
     render_dashboard(ui_state, session)?;
 
     loop {
-        if let Event::Key(key_event) = event::read()? {
-            match key_event.code {
+        match event::read()? {
+            Event::Resize(_, _) => {
+                render_dashboard(ui_state, session)?;
+            }
+            Event::Key(key_event) => match key_event.code {
                 KeyCode::Up => {
                     ui_state.active_index = if ui_state.active_index == 0 {
                         INTERACTIVE_ACTIONS.len() - 1
@@ -796,7 +986,6 @@ fn select_option_interactive(session: &mut SessionState, ui_state: &mut UiState)
                     return Ok(selected);
                 }
                 KeyCode::Char('q') | KeyCode::Esc => {
-                    execute!(io::stdout(), Clear(ClearType::All), MoveTo(0, 0))?;
                     return Ok("0".to_string());
                 }
                 KeyCode::Char('?') => {
@@ -829,13 +1018,14 @@ fn select_option_interactive(session: &mut SessionState, ui_state: &mut UiState)
                     }
                 }
                 _ => {}
-            }
+            },
+            _ => {}
         }
     }
 }
 
 fn append_output(session: &mut SessionState, line: String) {
-    let trimmed = line.trim_end().to_string();
+    let trimmed = sanitize_output_line(&line).trim_end().to_string();
     if trimmed.is_empty() {
         return;
     }
@@ -940,6 +1130,8 @@ fn run_subcommand(
 }
 
 pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
+    let _terminal_guard = TerminalUiGuard::enter_if_tty()?;
+
     let mut session = SessionState::default();
     let initial_index = INTERACTIVE_ACTIONS
         .iter()
@@ -1003,7 +1195,6 @@ pub async fn run(_args: &TuiArgs, policy_mode: PolicyMode) -> Result<()> {
 
         match choice {
             "0" => {
-                println!("Exiting xint interactive mode.");
                 break;
             }
             "1" => {
