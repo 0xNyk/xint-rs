@@ -6,19 +6,23 @@ use crate::api::xai;
 use crate::cli::ArticleArgs;
 use crate::client::XClient;
 use crate::config::Config;
-use crate::models::{Article, Tweet};
+use crate::models::{Article, Tweet, TweetArticle};
 
 pub async fn run(args: &ArticleArgs, config: &Config) -> Result<()> {
-    let xai_api_key = config.require_xai_key()?;
-
     let mut url = args.url.clone();
+    let mut article: Option<Article> = None;
 
     if is_x_tweet_like_url(&url) {
         println!("🔍 Fetching tweet to extract linked article...");
         let token = config.require_bearer_token()?;
         let client = XClient::new()?;
-        let (tweet, article_url) = fetch_tweet_for_article(&client, token, &url).await?;
-        if let Some(found) = article_url {
+        let (tweet, article_url, inline_article) =
+            fetch_tweet_for_article(&client, token, &url).await?;
+
+        if let Some(inline) = inline_article {
+            println!("📄 Found X Article: {}\n", inline.title);
+            article = Some(inline);
+        } else if let Some(found) = article_url {
             println!("📝 Tweet: {}", tweet.tweet_url);
             println!("📄 Found link: {found}\n");
             url = found;
@@ -29,23 +33,30 @@ pub async fn run(args: &ArticleArgs, config: &Config) -> Result<()> {
         }
     }
 
-    let parsed = url::Url::parse(&url).map_err(|_| anyhow::anyhow!("Invalid URL: {url}"))?;
-    let domain = parsed.host_str().unwrap_or("").to_string();
-    let timeout_secs = resolve_article_timeout_secs();
+    let article = if let Some(a) = article {
+        a
+    } else {
+        let xai_api_key = config.require_xai_key()?;
+        let parsed = url::Url::parse(&url).map_err(|_| anyhow::anyhow!("Invalid URL: {url}"))?;
+        let domain = parsed.host_str().unwrap_or("").to_string();
+        let timeout_secs = resolve_article_timeout_secs();
 
-    let http = reqwest::Client::new();
-    let raw = xai::web_search_article(&http, xai_api_key, &url, &domain, &args.model, timeout_secs)
-        .await?;
-
-    let article = parse_article_json(&raw, &url, &domain, args.full);
+        let http = reqwest::Client::new();
+        let raw =
+            xai::web_search_article(&http, xai_api_key, &url, &domain, &args.model, timeout_secs)
+                .await?;
+        parse_article_json(&raw, &url, &domain, args.full)
+    };
 
     // If AI prompt provided, analyze the article
     if let Some(ai_prompt) = &args.ai {
         println!("🤖 Analyzing with Grok...\n");
 
+        let xai_key = config.require_xai_key()?;
+        let http = reqwest::Client::new();
         let analysis = grok::analyze_query(
             &http,
-            xai_api_key,
+            xai_key,
             ai_prompt,
             Some(&article.content),
             &crate::models::GrokOpts::default(),
@@ -143,14 +154,55 @@ async fn fetch_tweet_for_article(
     client: &XClient,
     token: &str,
     tweet_url: &str,
-) -> Result<(Tweet, Option<String>)> {
+) -> Result<(Tweet, Option<String>, Option<Article>)> {
     let tweet_id = extract_tweet_id(tweet_url)
         .ok_or_else(|| anyhow::anyhow!("Invalid X tweet URL: {tweet_url}"))?;
     let tweet = twitter::get_tweet(client, token, &tweet_id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("Tweet not found: {tweet_id}"))?;
+
+    // If tweet has inline article data from X API, build Article directly
+    if let Some(ref tw_article) = tweet.article {
+        if !tw_article.plain_text.is_empty() {
+            let content = reconstruct_article_content(tw_article);
+            let word_count = content.split_whitespace().count() as u64;
+            let ttr = (word_count as f64 / 238.0).ceil().max(1.0) as u64;
+            let inline = Article {
+                url: tweet_url.to_string(),
+                title: if tw_article.title.is_empty() {
+                    "X Article".to_string()
+                } else {
+                    tw_article.title.clone()
+                },
+                description: tw_article.preview_text.clone().unwrap_or_default(),
+                content,
+                author: tweet.username.clone(),
+                published: tweet.created_at.clone(),
+                domain: "x.com".to_string(),
+                ttr,
+                word_count,
+            };
+            return Ok((tweet, None, Some(inline)));
+        }
+    }
+
     let article_url = pick_article_url_from_tweet(&tweet);
-    Ok((tweet, article_url))
+    Ok((tweet, article_url, None))
+}
+
+fn reconstruct_article_content(article: &TweetArticle) -> String {
+    let mut content = article.plain_text.clone();
+    if let Some(ref entities) = article.entities {
+        if let Some(ref code_blocks) = entities.code {
+            if !code_blocks.is_empty() {
+                content.push_str("\n\n---\n\nCode examples from article:\n");
+                for block in code_blocks {
+                    content.push_str(&format!("\n{}\n", block.content));
+                }
+            }
+        }
+    }
+    content
 }
 
 fn parse_article_json(raw: &str, url: &str, domain: &str, full: bool) -> Article {
@@ -282,6 +334,7 @@ mod tests {
             mentions: vec![],
             hashtags: vec![],
             tweet_url: "https://x.com/alice/status/1900100012345678901".to_string(),
+            article: None,
         }
     }
 
@@ -334,6 +387,46 @@ mod tests {
             pick_article_url_from_tweet(&tweet),
             Some("https://x.com/i/article/xyz".to_string())
         );
+    }
+
+    #[test]
+    fn reconstruct_article_content_plain_text_only() {
+        use crate::models::TweetArticle;
+        let article = TweetArticle {
+            title: "Test".to_string(),
+            plain_text: "Hello world article.".to_string(),
+            preview_text: None,
+            cover_media: None,
+            media_entities: None,
+            entities: None,
+        };
+        assert_eq!(
+            super::reconstruct_article_content(&article),
+            "Hello world article."
+        );
+    }
+
+    #[test]
+    fn reconstruct_article_content_with_code_blocks() {
+        use crate::models::{TweetArticle, TweetArticleCodeBlock, TweetArticleEntities};
+        let article = TweetArticle {
+            title: "Test".to_string(),
+            plain_text: "Some text.".to_string(),
+            preview_text: None,
+            cover_media: None,
+            media_entities: None,
+            entities: Some(TweetArticleEntities {
+                code: Some(vec![TweetArticleCodeBlock {
+                    language: "rust".to_string(),
+                    code: "let x = 1;".to_string(),
+                    content: "```rust\nlet x = 1;\n```".to_string(),
+                }]),
+            }),
+        };
+        let result = super::reconstruct_article_content(&article);
+        assert!(result.contains("Some text."));
+        assert!(result.contains("Code examples from article:"));
+        assert!(result.contains("```rust"));
     }
 
     #[test]

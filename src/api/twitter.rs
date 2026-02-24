@@ -144,6 +144,40 @@ pub fn parse_tweets(raw: &RawResponse) -> Vec<Tweet> {
 
             let tweet_url = format!("https://x.com/{username}/status/{id}");
 
+            // Parse inline article data if present
+            let article = t.get("article").and_then(|a| {
+                let plain_text = a.get("plain_text")?.as_str()?.to_string();
+                if plain_text.is_empty() {
+                    return None;
+                }
+                let title = a.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let preview_text = a.get("preview_text").and_then(|v| v.as_str()).map(String::from);
+                let cover_media = a.get("cover_media").and_then(|v| v.as_str()).map(String::from);
+                let media_entities = a.get("media_entities").and_then(|v| v.as_array()).map(|arr| {
+                    arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()
+                });
+                let entities = a.get("entities").and_then(|e| {
+                    let code = e.get("code").and_then(|v| v.as_array()).map(|arr| {
+                        arr.iter().filter_map(|c| {
+                            Some(crate::models::TweetArticleCodeBlock {
+                                language: c.get("language").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                                code: c.get("code").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                                content: c.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                            })
+                        }).collect()
+                    });
+                    Some(crate::models::TweetArticleEntities { code })
+                });
+                Some(crate::models::TweetArticle {
+                    title,
+                    plain_text,
+                    preview_text,
+                    cover_media,
+                    media_entities,
+                    entities,
+                })
+            });
+
             Some(Tweet {
                 id,
                 text,
@@ -157,6 +191,7 @@ pub fn parse_tweets(raw: &RawResponse) -> Vec<Tweet> {
                 mentions,
                 hashtags,
                 tweet_url,
+                article,
             })
         })
         .collect()

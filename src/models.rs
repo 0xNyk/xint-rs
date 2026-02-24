@@ -31,6 +31,33 @@ pub struct UrlEntity {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TweetArticleCodeBlock {
+    pub language: String,
+    pub code: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TweetArticleEntities {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<Vec<TweetArticleCodeBlock>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TweetArticle {
+    pub title: String,
+    pub plain_text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cover_media: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub media_entities: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entities: Option<TweetArticleEntities>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tweet {
     pub id: String,
     pub text: String,
@@ -44,6 +71,8 @@ pub struct Tweet {
     pub mentions: Vec<String>,
     pub hashtags: Vec<String>,
     pub tweet_url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub article: Option<TweetArticle>,
 }
 
 // ---------------------------------------------------------------------------
