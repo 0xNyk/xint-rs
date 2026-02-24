@@ -150,21 +150,50 @@ pub fn parse_tweets(raw: &RawResponse) -> Vec<Tweet> {
                 if plain_text.is_empty() {
                     return None;
                 }
-                let title = a.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let preview_text = a.get("preview_text").and_then(|v| v.as_str()).map(String::from);
-                let cover_media = a.get("cover_media").and_then(|v| v.as_str()).map(String::from);
-                let media_entities = a.get("media_entities").and_then(|v| v.as_array()).map(|arr| {
-                    arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()
-                });
+                let title = a
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let preview_text = a
+                    .get("preview_text")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+                let cover_media = a
+                    .get("cover_media")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+                let media_entities =
+                    a.get("media_entities")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str().map(String::from))
+                                .collect()
+                        });
                 let entities = a.get("entities").and_then(|e| {
                     let code = e.get("code").and_then(|v| v.as_array()).map(|arr| {
-                        arr.iter().filter_map(|c| {
-                            Some(crate::models::TweetArticleCodeBlock {
-                                language: c.get("language").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                                code: c.get("code").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                                content: c.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                        arr.iter()
+                            .filter_map(|c| {
+                                Some(crate::models::TweetArticleCodeBlock {
+                                    language: c
+                                        .get("language")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("")
+                                        .to_string(),
+                                    code: c
+                                        .get("code")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("")
+                                        .to_string(),
+                                    content: c
+                                        .get("content")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("")
+                                        .to_string(),
+                                })
                             })
-                        }).collect()
+                            .collect()
                     });
                     Some(crate::models::TweetArticleEntities { code })
                 });
