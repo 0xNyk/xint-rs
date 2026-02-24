@@ -7,7 +7,7 @@ use crate::models::RawResponse;
 const BASE_URL: &str = "https://api.x.com/2";
 const RATE_DELAY_MS: u64 = 350;
 
-pub const FIELDS: &str = "tweet.fields=created_at,public_metrics,author_id,conversation_id,entities&expansions=author_id&user.fields=username,name,public_metrics";
+pub const FIELDS: &str = "tweet.fields=created_at,public_metrics,author_id,conversation_id,entities,article&expansions=author_id&user.fields=username,name,public_metrics";
 
 /// Shared HTTP client for X API calls.
 pub struct XClient {
