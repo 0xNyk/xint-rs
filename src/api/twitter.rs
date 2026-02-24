@@ -171,31 +171,29 @@ pub fn parse_tweets(raw: &RawResponse) -> Vec<Tweet> {
                                 .filter_map(|v| v.as_str().map(String::from))
                                 .collect()
                         });
-                let entities = a.get("entities").and_then(|e| {
+                let entities = a.get("entities").map(|e| {
                     let code = e.get("code").and_then(|v| v.as_array()).map(|arr| {
                         arr.iter()
-                            .filter_map(|c| {
-                                Some(crate::models::TweetArticleCodeBlock {
-                                    language: c
-                                        .get("language")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("")
-                                        .to_string(),
-                                    code: c
-                                        .get("code")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("")
-                                        .to_string(),
-                                    content: c
-                                        .get("content")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("")
-                                        .to_string(),
-                                })
+                            .map(|c| crate::models::TweetArticleCodeBlock {
+                                language: c
+                                    .get("language")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string(),
+                                code: c
+                                    .get("code")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string(),
+                                content: c
+                                    .get("content")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string(),
                             })
                             .collect()
                     });
-                    Some(crate::models::TweetArticleEntities { code })
+                    crate::models::TweetArticleEntities { code }
                 });
                 Some(crate::models::TweetArticle {
                     title,
