@@ -666,10 +666,6 @@ pub struct AnalyzeArgs {
     #[arg(long, default_value = "grok-3-mini")]
     pub model: String,
 
-    /// Custom system prompt
-    #[arg(long)]
-    pub system: Option<String>,
-
     /// Analyze tweets from JSON file
     #[arg(long)]
     pub tweets: Option<String>,

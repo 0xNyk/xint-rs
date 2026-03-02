@@ -212,12 +212,26 @@ pub async fn web_search_article(
          Return ONLY valid JSON, no markdown fences, no explanation.\n\nURL: {url}"
     );
 
-    let body = serde_json::json!({
-        "model": model,
-        "tools": [{
+    // Don't restrict to x.com/twitter.com domains — Grok can't browse them
+    let domain_lower = domain.to_ascii_lowercase();
+    let is_x_domain = domain_lower == "x.com"
+        || domain_lower == "twitter.com"
+        || domain_lower.ends_with(".x.com")
+        || domain_lower.ends_with(".twitter.com")
+        || domain_lower.is_empty();
+
+    let tool_spec = if is_x_domain {
+        serde_json::json!({ "type": "web_search" })
+    } else {
+        serde_json::json!({
             "type": "web_search",
             "allowed_domains": [domain],
-        }],
+        })
+    };
+
+    let body = serde_json::json!({
+        "model": model,
+        "tools": [tool_spec],
         "input": [{
             "role": "user",
             "content": prompt,
