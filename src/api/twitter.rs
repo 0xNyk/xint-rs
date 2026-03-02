@@ -27,7 +27,17 @@ pub fn parse_tweets(raw: &RawResponse) -> Vec<Tweet> {
         .iter()
         .filter_map(|t| {
             let id = t.get("id")?.as_str()?.to_string();
-            let text = t.get("text")?.as_str()?.to_string();
+            let mut text = t.get("text")?.as_str()?.to_string();
+            // Prefer note_tweet.text for extended posts (280-25K chars)
+            if let Some(note_text) = t
+                .get("note_tweet")
+                .and_then(|nt| nt.get("text"))
+                .and_then(|v| v.as_str())
+            {
+                if note_text.len() > text.len() {
+                    text = note_text.to_string();
+                }
+            }
             let author_id = t
                 .get("author_id")
                 .and_then(|v| v.as_str())
@@ -146,10 +156,6 @@ pub fn parse_tweets(raw: &RawResponse) -> Vec<Tweet> {
 
             // Parse inline article data if present
             let article = t.get("article").and_then(|a| {
-                let plain_text = a.get("plain_text")?.as_str()?.to_string();
-                if plain_text.is_empty() {
-                    return None;
-                }
                 let title = a
                     .get("title")
                     .and_then(|v| v.as_str())
@@ -159,6 +165,18 @@ pub fn parse_tweets(raw: &RawResponse) -> Vec<Tweet> {
                     .get("preview_text")
                     .and_then(|v| v.as_str())
                     .map(String::from);
+                // X API v2 rarely returns plain_text; fall back to preview_text
+                let plain_text = a
+                    .get("plain_text")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(String::from)
+                    .or_else(|| preview_text.clone())
+                    .unwrap_or_default();
+                // Need at least a title or some text to consider this a valid article
+                if title.is_empty() && plain_text.is_empty() {
+                    return None;
+                }
                 let cover_media = a
                     .get("cover_media")
                     .and_then(|v| v.as_str())

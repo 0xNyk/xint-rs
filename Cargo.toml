@@ -1,6 +1,6 @@
 [package]
 name = "xint"
-version = "2026.2.24"
+version = "2026.3.2-1"
 edition = "2021"
 description = "X Intelligence CLI — search, analyze, and engage on X/Twitter from the terminal"
 license = "MIT"

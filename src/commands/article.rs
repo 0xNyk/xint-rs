@@ -35,6 +35,36 @@ pub async fn run(args: &ArticleArgs, config: &Config) -> Result<()> {
 
     let article = if let Some(a) = article {
         a
+    } else if is_x_article_url(&url) {
+        // X Articles can't be fetched via web_search (Grok can't browse x.com).
+        // Build a metadata-only article and optionally enrich via Grok analyze.
+        let meta_article = Article {
+            url: url.clone(),
+            title: "X Article".to_string(),
+            description: String::new(),
+            content: "[Article content is behind X authentication. Only metadata is available from the API.]".to_string(),
+            author: String::new(),
+            published: String::new(),
+            domain: "x.com".to_string(),
+            ttr: 0,
+            word_count: 0,
+        };
+        if let Ok(xai_key) = config.require_xai_key() {
+            println!("🔍 Searching web for article context...");
+            let http = reqwest::Client::new();
+            let timeout_secs = resolve_article_timeout_secs();
+            match xai::web_search_article(&http, xai_key, &url, "", &args.model, timeout_secs).await
+            {
+                Ok(raw) => parse_article_json(&raw, &url, "x.com", args.full),
+                Err(_) => {
+                    println!("⚠️  Could not enrich article from web. Showing metadata only.\n");
+                    meta_article
+                }
+            }
+        } else {
+            println!("⚠️  No xAI key — showing metadata only.\n");
+            meta_article
+        }
     } else {
         let xai_api_key = config.require_xai_key()?;
         let parsed = url::Url::parse(&url).map_err(|_| anyhow::anyhow!("Invalid URL: {url}"))?;
@@ -184,6 +214,24 @@ async fn fetch_tweet_for_article(
             };
             return Ok((tweet, None, Some(inline)));
         }
+    }
+
+    // If tweet text is long (note_tweet was used), treat it as article content
+    if tweet.text.len() > 280 {
+        let word_count = tweet.text.split_whitespace().count() as u64;
+        let ttr = (word_count as f64 / 238.0).ceil().max(1.0) as u64;
+        let inline = Article {
+            url: tweet_url.to_string(),
+            title: format!("Thread by @{}", tweet.username),
+            description: tweet.text.chars().take(200).collect::<String>() + "...",
+            content: tweet.text.clone(),
+            author: tweet.username.clone(),
+            published: tweet.created_at.clone(),
+            domain: "x.com".to_string(),
+            ttr,
+            word_count,
+        };
+        return Ok((tweet, None, Some(inline)));
     }
 
     let article_url = pick_article_url_from_tweet(&tweet);
