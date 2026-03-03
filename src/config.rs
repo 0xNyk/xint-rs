@@ -12,8 +12,14 @@ pub struct Config {
 
 impl Config {
     /// Load configuration from environment and optional .env file.
+    ///
+    /// Search order (first found wins per variable):
+    /// 1. Already-set environment variables
+    /// 2. `.env` in the current working directory
+    /// 3. `.env` next to the binary
+    /// 4. `~/.xint/.env` (canonical user config location)
     pub fn load() -> Result<Self> {
-        // Try loading .env from current dir, then from binary dir
+        // Try loading .env from current dir
         let _ = dotenvy::dotenv();
 
         // Also try .env next to the binary
@@ -23,6 +29,14 @@ impl Config {
                 if env_path.exists() {
                     let _ = dotenvy::from_path(&env_path);
                 }
+            }
+        }
+
+        // Try ~/.xint/.env (canonical user config)
+        if let Ok(home) = std::env::var("HOME") {
+            let xint_env = PathBuf::from(home).join(".xint/.env");
+            if xint_env.exists() {
+                let _ = dotenvy::from_path(&xint_env);
             }
         }
 
@@ -99,7 +113,15 @@ impl Config {
 }
 
 fn resolve_data_dir() -> PathBuf {
-    // Try relative to binary
+    // 1. Canonical user data dir: ~/.xint/data/ (highest priority)
+    if let Ok(home) = std::env::var("HOME") {
+        let xint_data = PathBuf::from(&home).join(".xint/data");
+        if xint_data.exists() || std::fs::create_dir_all(&xint_data).is_ok() {
+            return xint_data;
+        }
+    }
+
+    // 2. Try relative to binary (brew cellar, development)
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
             let data = parent.join("data");
@@ -109,12 +131,6 @@ fn resolve_data_dir() -> PathBuf {
         }
     }
 
-    // Try current directory
-    let cwd_data = PathBuf::from("data");
-    if cwd_data.exists() {
-        return cwd_data;
-    }
-
-    // Default: create in current directory
-    cwd_data
+    // 3. Last resort: current directory
+    PathBuf::from("data")
 }
