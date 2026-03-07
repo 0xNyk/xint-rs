@@ -1,5 +1,7 @@
+use crate::costs;
 use crate::models::*;
 use anyhow::{bail, Result};
+use std::path::Path;
 
 const XAI_ENDPOINT: &str = "https://api.x.ai/v1/chat/completions";
 
@@ -33,6 +35,17 @@ pub async fn grok_chat(
     api_key: &str,
     messages: &[GrokMessage],
     opts: &GrokOpts,
+) -> Result<GrokResponse> {
+    grok_chat_tracked(http, api_key, messages, opts, None).await
+}
+
+/// Send a chat completion request with cost tracking.
+pub async fn grok_chat_tracked(
+    http: &reqwest::Client,
+    api_key: &str,
+    messages: &[GrokMessage],
+    opts: &GrokOpts,
+    costs_path: Option<&Path>,
 ) -> Result<GrokResponse> {
     let body = serde_json::json!({
         "model": opts.model,
@@ -98,6 +111,14 @@ pub async fn grok_chat(
             .unwrap_or(0),
     };
 
+    // Track cost if costs_path provided
+    if let Some(cp) = costs_path {
+        let (input_rate, output_rate) = model_pricing(&model);
+        let cost_usd = (usage.prompt_tokens as f64 / 1_000_000.0) * input_rate
+            + (usage.completion_tokens as f64 / 1_000_000.0) * output_rate;
+        costs::track_cost_direct(cp, "grok_chat", XAI_ENDPOINT, cost_usd);
+    }
+
     Ok(GrokResponse {
         content,
         model,
@@ -136,12 +157,25 @@ pub fn format_tweets_for_context(tweets: &[Tweet]) -> String {
 }
 
 /// Analyze tweets with Grok.
+#[allow(dead_code)]
 pub async fn analyze_tweets(
     http: &reqwest::Client,
     api_key: &str,
     tweets: &[Tweet],
     prompt: Option<&str>,
     opts: &GrokOpts,
+) -> Result<GrokResponse> {
+    analyze_tweets_tracked(http, api_key, tweets, prompt, opts, None).await
+}
+
+/// Analyze tweets with Grok and cost tracking.
+pub async fn analyze_tweets_tracked(
+    http: &reqwest::Client,
+    api_key: &str,
+    tweets: &[Tweet],
+    prompt: Option<&str>,
+    opts: &GrokOpts,
+    costs_path: Option<&Path>,
 ) -> Result<GrokResponse> {
     if tweets.is_empty() {
         bail!("No tweets to analyze");
@@ -167,16 +201,29 @@ pub async fn analyze_tweets(
         },
     ];
 
-    grok_chat(http, api_key, &messages, opts).await
+    grok_chat_tracked(http, api_key, &messages, opts, costs_path).await
 }
 
 /// General-purpose query with optional context.
+#[allow(dead_code)]
 pub async fn analyze_query(
     http: &reqwest::Client,
     api_key: &str,
     query: &str,
     context: Option<&str>,
     opts: &GrokOpts,
+) -> Result<GrokResponse> {
+    analyze_query_tracked(http, api_key, query, context, opts, None).await
+}
+
+/// General-purpose query with cost tracking.
+pub async fn analyze_query_tracked(
+    http: &reqwest::Client,
+    api_key: &str,
+    query: &str,
+    context: Option<&str>,
+    opts: &GrokOpts,
+    costs_path: Option<&Path>,
 ) -> Result<GrokResponse> {
     let user_content = match context {
         Some(ctx) => format!("Context:\n{ctx}\n\nQuestion: {query}"),
@@ -194,7 +241,7 @@ pub async fn analyze_query(
         },
     ];
 
-    grok_chat(http, api_key, &messages, opts).await
+    grok_chat_tracked(http, api_key, &messages, opts, costs_path).await
 }
 
 /// Summarize trending topics.

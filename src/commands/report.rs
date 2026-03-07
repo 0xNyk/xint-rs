@@ -85,7 +85,7 @@ pub async fn run(args: &ReportArgs, config: &Config, client: &XClient) -> Result
         if let Ok(api_key) = config.require_xai_key() {
             eprintln!("  Running sentiment analysis...");
             let http = reqwest::Client::new();
-            match sentiment::analyze_sentiment(&http, api_key, &top_tweets, Some(&args.model)).await
+            match sentiment::analyze_sentiment(&http, api_key, &top_tweets, Some(&args.model), Some(&config.costs_path())).await
             {
                 Ok(sentiments) => {
                     let stats = sentiment::compute_stats(&sentiments);
@@ -162,7 +162,7 @@ pub async fn run(args: &ReportArgs, config: &Config, client: &XClient) -> Result
             ..Default::default()
         };
 
-        match grok::analyze_query(&http, api_key, &prompt, Some(&tweet_context), &opts).await {
+        match grok::analyze_query_tracked(&http, api_key, &prompt, Some(&tweet_context), &opts, Some(&config.costs_path())).await {
             Ok(response) => ai_summary = response.content,
             Err(e) => ai_summary = format!("*AI summary unavailable: {e}*"),
         }

@@ -1,6 +1,7 @@
 use crate::api::grok;
 use crate::models::*;
 use anyhow::Result;
+use std::path::Path;
 
 const SENTIMENT_SYSTEM: &str = r#"You are a sentiment analysis engine. Given tweets, return a JSON array with sentiment analysis for each tweet.
 
@@ -21,6 +22,7 @@ pub async fn analyze_sentiment(
     api_key: &str,
     tweets: &[Tweet],
     model: Option<&str>,
+    costs_path: Option<&Path>,
 ) -> Result<Vec<SentimentResult>> {
     if tweets.is_empty() {
         return Ok(Vec::new());
@@ -64,7 +66,7 @@ pub async fn analyze_sentiment(
             max_tokens: 2048,
         };
 
-        match grok::grok_chat(http, api_key, &messages, &opts).await {
+        match grok::grok_chat_tracked(http, api_key, &messages, &opts, costs_path).await {
             Ok(response) => {
                 let parsed = parse_json_response(&response.content, chunk);
                 results.extend(parsed);
