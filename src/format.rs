@@ -1,5 +1,7 @@
 use crate::models::Tweet;
 use chrono::Utc;
+use serde::Serialize;
+use serde_json::{Map, Value};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -287,4 +289,99 @@ pub fn format_csv(tweets: &[Tweet]) -> String {
         .chain(rows)
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+pub fn active_fields() -> Option<String> {
+    std::env::var("XINT_FIELDS")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+fn parse_field_paths(fields: &str) -> Vec<Vec<String>> {
+    fields
+        .split(',')
+        .map(|field| field.trim())
+        .filter(|field| !field.is_empty())
+        .map(|field| field.split('.').map(|p| p.trim().to_string()).collect())
+        .filter(|parts: &Vec<String>| !parts.is_empty() && parts.iter().all(|p| !p.is_empty()))
+        .collect()
+}
+
+fn extract_path(value: &Value, path: &[String]) -> Option<Value> {
+    if path.is_empty() {
+        return Some(value.clone());
+    }
+    match value {
+        Value::Object(map) => {
+            let head = &path[0];
+            let next = map.get(head)?;
+            extract_path(next, &path[1..])
+        }
+        _ => None,
+    }
+}
+
+fn insert_path(target: &mut Map<String, Value>, path: &[String], value: Value) {
+    if path.is_empty() {
+        return;
+    }
+    if path.len() == 1 {
+        target.insert(path[0].clone(), value);
+        return;
+    }
+
+    let key = path[0].clone();
+    let entry = target
+        .entry(key)
+        .or_insert_with(|| Value::Object(Map::new()));
+    if !entry.is_object() {
+        *entry = Value::Object(Map::new());
+    }
+    if let Value::Object(obj) = entry {
+        insert_path(obj, &path[1..], value);
+    }
+}
+
+fn filter_object(value: &Value, paths: &[Vec<String>]) -> Value {
+    let mut out = Map::new();
+    for path in paths {
+        if let Some(found) = extract_path(value, path) {
+            insert_path(&mut out, path, found);
+        }
+    }
+    Value::Object(out)
+}
+
+pub fn filter_fields(value: &Value, fields: &str) -> Value {
+    let paths = parse_field_paths(fields);
+    if paths.is_empty() {
+        return value.clone();
+    }
+
+    match value {
+        Value::Object(_) => filter_object(value, &paths),
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|item| {
+                    if item.is_object() {
+                        filter_object(item, &paths)
+                    } else {
+                        item.clone()
+                    }
+                })
+                .collect(),
+        ),
+        _ => value.clone(),
+    }
+}
+
+pub fn print_json_pretty_filtered<T: Serialize>(value: &T) -> anyhow::Result<()> {
+    let mut json = serde_json::to_value(value)?;
+    if let Some(fields) = active_fields() {
+        json = filter_fields(&json, &fields);
+    }
+    println!("{}", serde_json::to_string_pretty(&json)?);
+    Ok(())
 }

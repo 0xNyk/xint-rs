@@ -5,6 +5,7 @@ use crate::cli::ModerationArgs;
 use crate::client::XClient;
 use crate::config::Config;
 use crate::costs;
+use crate::format;
 
 const USER_FIELDS: &str = "user.fields=id,username,name,description,public_metrics";
 
@@ -159,7 +160,7 @@ async fn cmd_list(
     );
 
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&users)?);
+        format::print_json_pretty_filtered(&users)?;
         return Ok(());
     }
 
@@ -224,7 +225,7 @@ async fn cmd_add(
     );
 
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&result)?);
+        format::print_json_pretty_filtered(&result)?;
     } else {
         let success = is_added(&result, mode) || result.get("success").is_some();
         if success {
@@ -277,7 +278,7 @@ async fn cmd_remove(
     );
 
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&result)?);
+        format::print_json_pretty_filtered(&result)?;
     } else {
         let success = is_removed(&result, mode) || result.get("success").is_some();
         if success {

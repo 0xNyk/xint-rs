@@ -40,10 +40,10 @@ impl Config {
             }
         }
 
-        let bearer_token = std::env::var("X_BEARER_TOKEN").ok();
-        let client_id = std::env::var("X_CLIENT_ID").ok();
-        let xai_api_key = std::env::var("XAI_API_KEY").ok();
-        let xai_management_api_key = std::env::var("XAI_MANAGEMENT_API_KEY").ok();
+        let bearer_token = non_empty_env("X_BEARER_TOKEN");
+        let client_id = non_empty_env("X_CLIENT_ID");
+        let xai_api_key = non_empty_env("XAI_API_KEY");
+        let xai_management_api_key = non_empty_env("XAI_MANAGEMENT_API_KEY");
 
         // Data dir: ./data/ relative to binary, or current dir
         let data_dir = resolve_data_dir();
@@ -133,4 +133,11 @@ fn resolve_data_dir() -> PathBuf {
 
     // 3. Last resort: current directory
     PathBuf::from("data")
+}
+
+fn non_empty_env(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }

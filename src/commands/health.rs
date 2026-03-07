@@ -6,6 +6,7 @@ use crate::cli::HealthArgs;
 use crate::client::XClient;
 use crate::config::Config;
 use crate::costs;
+use crate::format;
 use crate::reliability;
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -312,7 +313,7 @@ pub async fn run_auth_doctor(
     let report = auth_doctor_report(config, client).await;
 
     if as_json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
+        format::print_json_pretty_filtered(&report)?;
     } else {
         println!(
             "{} Auth Doctor ({})",
@@ -375,7 +376,7 @@ pub async fn run(args: &HealthArgs, config: &Config, client: &XClient) -> Result
     };
 
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
+        format::print_json_pretty_filtered(&report)?;
         return Ok(());
     }
 

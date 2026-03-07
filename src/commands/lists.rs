@@ -5,6 +5,7 @@ use crate::cli::ListsArgs;
 use crate::client::XClient;
 use crate::config::Config;
 use crate::costs;
+use crate::format;
 
 const LIST_FIELDS: &str =
     "list.fields=id,name,owner_id,private,description,created_at,follower_count,member_count";
@@ -63,7 +64,7 @@ async fn cmd_list(
     );
 
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&lists)?);
+        format::print_json_pretty_filtered(&lists)?;
         return Ok(());
     }
 
@@ -139,7 +140,7 @@ async fn cmd_create(
     costs::track_cost(&config.costs_path(), "lists_create", "/2/lists", 0);
 
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&result)?);
+        format::print_json_pretty_filtered(&result)?;
     } else {
         let id = result
             .pointer("/data/id")
@@ -200,7 +201,7 @@ async fn cmd_update(
     );
 
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&result)?);
+        format::print_json_pretty_filtered(&result)?;
     } else {
         let updated = result
             .pointer("/data/updated")
@@ -239,7 +240,7 @@ async fn cmd_delete(
     );
 
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&result)?);
+        format::print_json_pretty_filtered(&result)?;
     } else {
         let deleted = result
             .pointer("/data/deleted")
@@ -279,7 +280,7 @@ async fn cmd_members(
             );
 
             if args.json {
-                println!("{}", serde_json::to_string_pretty(&members)?);
+                format::print_json_pretty_filtered(&members)?;
                 return Ok(());
             }
 
@@ -335,7 +336,7 @@ async fn cmd_members(
             );
 
             if args.json {
-                println!("{}", serde_json::to_string_pretty(&result)?);
+                format::print_json_pretty_filtered(&result)?;
             } else {
                 let is_member = result
                     .pointer("/data/is_member")
@@ -374,7 +375,7 @@ async fn cmd_members(
             );
 
             if args.json {
-                println!("{}", serde_json::to_string_pretty(&result)?);
+                format::print_json_pretty_filtered(&result)?;
             } else {
                 let is_member = result
                     .pointer("/data/is_member")

@@ -236,7 +236,7 @@ pub async fn run_stream_rules(
             );
 
             if args.json {
-                println!("{}", serde_json::to_string_pretty(&rules)?);
+                format::print_json_pretty_filtered(&rules)?;
                 return Ok(());
             }
 
@@ -280,7 +280,7 @@ pub async fn run_stream_rules(
             );
 
             if args.json {
-                println!("{}", serde_json::to_string_pretty(&res)?);
+                format::print_json_pretty_filtered(&res)?;
             } else {
                 println!("✅ Added stream rule.");
             }
@@ -303,7 +303,7 @@ pub async fn run_stream_rules(
             );
 
             if args.json {
-                println!("{}", serde_json::to_string_pretty(&res)?);
+                format::print_json_pretty_filtered(&res)?;
             } else {
                 println!("✅ Deleted stream rule(s).");
             }
@@ -326,7 +326,7 @@ pub async fn run_stream_rules(
                 0,
             );
             if args.json {
-                println!("{}", serde_json::to_string_pretty(&res)?);
+                format::print_json_pretty_filtered(&res)?;
             } else {
                 println!("✅ Cleared all stream rules.");
             }
