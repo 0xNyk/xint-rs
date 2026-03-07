@@ -7,6 +7,22 @@ pub struct Cli {
     #[arg(long, global = true, value_enum, default_value_t = PolicyMode::ReadOnly)]
     pub policy: PolicyMode,
 
+    /// Print tool description + input/output schema as JSON, then exit
+    #[arg(long, global = true)]
+    pub describe: bool,
+
+    /// Print just the JSON schema for a command, then exit
+    #[arg(long, global = true)]
+    pub schema: bool,
+
+    /// Filter output fields (comma-separated dot-paths, e.g. id,text,metrics.likes)
+    #[arg(long, global = true)]
+    pub fields: Option<String>,
+
+    /// Preview what a mutation command would do without executing
+    #[arg(long, global = true)]
+    pub dry_run: bool,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
 }

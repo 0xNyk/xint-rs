@@ -6,6 +6,7 @@ use crate::api::xai;
 use crate::cli::ArticleArgs;
 use crate::client::XClient;
 use crate::config::Config;
+use crate::format;
 use crate::models::{Article, Tweet, TweetArticle};
 
 pub async fn run(args: &ArticleArgs, config: &Config) -> Result<()> {
@@ -99,7 +100,7 @@ pub async fn run(args: &ArticleArgs, config: &Config) -> Result<()> {
     }
 
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&article)?);
+        format::print_json_pretty_filtered(&article)?;
     } else {
         println!("{}", format_article(&article));
     }

@@ -93,7 +93,7 @@ pub async fn run_likes(args: &LikesArgs, config: &Config, client: &XClient) -> R
     tweets.truncate(args.limit);
 
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&tweets)?);
+        format::print_json_pretty_filtered(&tweets)?;
     } else if args.markdown {
         println!(
             "{}",
@@ -120,7 +120,18 @@ pub async fn run_likes(args: &LikesArgs, config: &Config, client: &XClient) -> R
 // Like
 // ---------------------------------------------------------------------------
 
-pub async fn run_like(args: &LikeArgs, config: &Config, client: &XClient) -> Result<()> {
+pub async fn run_like(
+    args: &LikeArgs,
+    config: &Config,
+    client: &XClient,
+    dry_run: bool,
+) -> Result<()> {
+    if dry_run {
+        println!("[dry-run] Would like tweet {}", args.tweet_id);
+        println!("[dry-run] Endpoint: POST /2/users/{{id}}/likes");
+        return Ok(());
+    }
+
     let client_id = config.require_client_id()?;
     let (access_token, tokens) =
         oauth::get_valid_token(client, &config.tokens_path(), client_id).await?;
@@ -145,7 +156,21 @@ pub async fn run_like(args: &LikeArgs, config: &Config, client: &XClient) -> Res
 // Unlike
 // ---------------------------------------------------------------------------
 
-pub async fn run_unlike(args: &UnlikeArgs, config: &Config, client: &XClient) -> Result<()> {
+pub async fn run_unlike(
+    args: &UnlikeArgs,
+    config: &Config,
+    client: &XClient,
+    dry_run: bool,
+) -> Result<()> {
+    if dry_run {
+        println!("[dry-run] Would unlike tweet {}", args.tweet_id);
+        println!(
+            "[dry-run] Endpoint: DELETE /2/users/{{id}}/likes/{}",
+            args.tweet_id
+        );
+        return Ok(());
+    }
+
     let client_id = config.require_client_id()?;
     let (access_token, tokens) =
         oauth::get_valid_token(client, &config.tokens_path(), client_id).await?;
@@ -171,7 +196,18 @@ pub async fn run_unlike(args: &UnlikeArgs, config: &Config, client: &XClient) ->
 // Bookmark save
 // ---------------------------------------------------------------------------
 
-pub async fn run_bookmark(args: &BookmarkArgs, config: &Config, client: &XClient) -> Result<()> {
+pub async fn run_bookmark(
+    args: &BookmarkArgs,
+    config: &Config,
+    client: &XClient,
+    dry_run: bool,
+) -> Result<()> {
+    if dry_run {
+        println!("[dry-run] Would bookmark tweet {}", args.tweet_id);
+        println!("[dry-run] Endpoint: POST /2/users/{{id}}/bookmarks");
+        return Ok(());
+    }
+
     let client_id = config.require_client_id()?;
     let (access_token, tokens) =
         oauth::get_valid_token(client, &config.tokens_path(), client_id).await?;
@@ -205,7 +241,20 @@ pub async fn run_unbookmark(
     args: &UnbookmarkArgs,
     config: &Config,
     client: &XClient,
+    dry_run: bool,
 ) -> Result<()> {
+    if dry_run {
+        println!(
+            "[dry-run] Would remove bookmark for tweet {}",
+            args.tweet_id
+        );
+        println!(
+            "[dry-run] Endpoint: DELETE /2/users/{{id}}/bookmarks/{}",
+            args.tweet_id
+        );
+        return Ok(());
+    }
+
     let client_id = config.require_client_id()?;
     let (access_token, tokens) =
         oauth::get_valid_token(client, &config.tokens_path(), client_id).await?;
@@ -292,7 +341,7 @@ pub async fn run_following(args: &FollowingArgs, config: &Config, client: &XClie
     all_users.truncate(args.limit);
 
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&all_users)?);
+        format::print_json_pretty_filtered(&all_users)?;
         return Ok(());
     }
 
@@ -329,7 +378,18 @@ pub async fn run_following(args: &FollowingArgs, config: &Config, client: &XClie
 // Follow / Unfollow (write)
 // ---------------------------------------------------------------------------
 
-pub async fn run_follow(args: &FollowActionArgs, config: &Config, client: &XClient) -> Result<()> {
+pub async fn run_follow(
+    args: &FollowActionArgs,
+    config: &Config,
+    client: &XClient,
+    dry_run: bool,
+) -> Result<()> {
+    if dry_run {
+        println!("[dry-run] Would follow {}", args.target);
+        println!("[dry-run] Endpoint: POST /2/users/{{id}}/following");
+        return Ok(());
+    }
+
     let client_id = config.require_client_id()?;
     let (access_token, tokens) =
         oauth::get_valid_token(client, &config.tokens_path(), client_id).await?;
@@ -343,7 +403,7 @@ pub async fn run_follow(args: &FollowActionArgs, config: &Config, client: &XClie
     costs::track_cost(&config.costs_path(), "follow", "/2/users/following", 0);
 
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&result)?);
+        format::print_json_pretty_filtered(&result)?;
     } else {
         let success = result.pointer("/data/following") == Some(&serde_json::Value::Bool(true))
             || result.get("success").is_some();
@@ -361,7 +421,14 @@ pub async fn run_unfollow(
     args: &FollowActionArgs,
     config: &Config,
     client: &XClient,
+    dry_run: bool,
 ) -> Result<()> {
+    if dry_run {
+        println!("[dry-run] Would unfollow {}", args.target);
+        println!("[dry-run] Endpoint: DELETE /2/users/{{id}}/following/{{target_user_id}}");
+        return Ok(());
+    }
+
     let client_id = config.require_client_id()?;
     let (access_token, tokens) =
         oauth::get_valid_token(client, &config.tokens_path(), client_id).await?;
@@ -374,7 +441,7 @@ pub async fn run_unfollow(
     costs::track_cost(&config.costs_path(), "unfollow", "/2/users/following", 0);
 
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&result)?);
+        format::print_json_pretty_filtered(&result)?;
     } else {
         let success = result.pointer("/data/following") == Some(&serde_json::Value::Bool(false))
             || result.get("success").is_some();

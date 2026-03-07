@@ -117,7 +117,7 @@ pub async fn run(args: &BookmarksArgs, config: &Config, client: &XClient) -> Res
     }
 
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&shown)?);
+        format::print_json_pretty_filtered(&shown)?;
     } else if args.markdown {
         let md = format::format_research_markdown("Bookmarks", &shown, &["bookmarks"]);
         println!("{md}");

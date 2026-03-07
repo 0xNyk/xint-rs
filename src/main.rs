@@ -7,6 +7,7 @@ mod client;
 mod commands;
 mod config;
 mod costs;
+mod errors;
 mod format;
 mod mcp;
 mod mcp_dispatcher;
@@ -29,6 +30,43 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     let config = Config::load()?;
     let client = XClient::new()?;
+    let dry_run = cli.dry_run;
+
+    // Handle --describe and --schema introspection before command dispatch
+    if cli.describe || cli.schema {
+        let tools = mcp::MCPServer::get_tools_static();
+        let cmd_name = cli
+            .command
+            .as_ref()
+            .map(policy::command_name)
+            .unwrap_or("help");
+        let tool_name = format!("xint_{}", cmd_name);
+        if let Some(tool) = tools.iter().find(|t| t.name == tool_name) {
+            if cli.schema {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&tool.input_schema).unwrap_or_default()
+                );
+            } else {
+                let describe = serde_json::json!({
+                    "name": tool.name,
+                    "description": tool.description,
+                    "inputSchema": tool.input_schema,
+                    "outputSchema": tool.output_schema,
+                });
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&describe).unwrap_or_default()
+                );
+            }
+        } else {
+            println!(
+                "{{\"error\":\"No schema found for command '{}'\"}}",
+                cmd_name
+            );
+        }
+        return Ok(());
+    }
 
     if let Some(ref cmd) = cli.command {
         let required = policy::required_mode(cmd);
@@ -36,6 +74,11 @@ async fn main() -> Result<()> {
             policy::emit_policy_denied(cmd, cli.policy, required);
             std::process::exit(2);
         }
+    }
+
+    if let Some(ref fields) = cli.fields {
+        // SAFETY: set once at startup before async command execution begins.
+        unsafe { std::env::set_var("XINT_FIELDS", fields) };
     }
 
     let metric_command = cli
@@ -62,17 +105,19 @@ async fn main() -> Result<()> {
         Some(Commands::Tui(args)) => commands::tui::run(&args, cli.policy).await,
         Some(Commands::Bookmarks(args)) => commands::bookmarks::run(&args, &config, &client).await,
         Some(Commands::Bookmark(args)) => {
-            commands::engagement::run_bookmark(&args, &config, &client).await
+            commands::engagement::run_bookmark(&args, &config, &client, dry_run).await
         }
         Some(Commands::Unbookmark(args)) => {
-            commands::engagement::run_unbookmark(&args, &config, &client).await
+            commands::engagement::run_unbookmark(&args, &config, &client, dry_run).await
         }
         Some(Commands::Likes(args)) => {
             commands::engagement::run_likes(&args, &config, &client).await
         }
-        Some(Commands::Like(args)) => commands::engagement::run_like(&args, &config, &client).await,
+        Some(Commands::Like(args)) => {
+            commands::engagement::run_like(&args, &config, &client, dry_run).await
+        }
         Some(Commands::Unlike(args)) => {
-            commands::engagement::run_unlike(&args, &config, &client).await
+            commands::engagement::run_unlike(&args, &config, &client, dry_run).await
         }
         Some(Commands::Following(args)) => {
             commands::engagement::run_following(&args, &config, &client).await
@@ -84,10 +129,10 @@ async fn main() -> Result<()> {
             commands::moderation::run_mutes(&args, &config, &client).await
         }
         Some(Commands::Follow(args)) => {
-            commands::engagement::run_follow(&args, &config, &client).await
+            commands::engagement::run_follow(&args, &config, &client, dry_run).await
         }
         Some(Commands::Unfollow(args)) => {
-            commands::engagement::run_unfollow(&args, &config, &client).await
+            commands::engagement::run_unfollow(&args, &config, &client, dry_run).await
         }
         Some(Commands::Lists(args)) => commands::lists::run(&args, &config, &client).await,
         Some(Commands::Trends(args)) => commands::trends::run(&args, &config, &client).await,

@@ -45,9 +45,13 @@ pub fn build_meta(
 }
 
 pub fn print_json_with_meta<T: Serialize>(meta: &OutputMeta, data: &T) -> Result<()> {
+    let mut data_json = serde_json::to_value(data)?;
+    if let Some(fields) = crate::format::active_fields() {
+        data_json = crate::format::filter_fields(&data_json, &fields);
+    }
     let payload = serde_json::json!({
         "meta": meta,
-        "data": data,
+        "data": data_json,
     });
     println!("{}", serde_json::to_string_pretty(&payload)?);
     Ok(())

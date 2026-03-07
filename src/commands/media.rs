@@ -8,6 +8,7 @@ use crate::cli::MediaArgs;
 use crate::client::XClient;
 use crate::config::Config;
 use crate::costs;
+use crate::format;
 
 #[derive(Debug, Serialize)]
 struct DownloadRecord {
@@ -211,7 +212,7 @@ pub async fn run(args: &MediaArgs, config: &Config, client: &XClient) -> Result<
             "downloaded": records.iter().filter(|r| r.error.is_none()).count(),
             "records": records,
         });
-        println!("{}", serde_json::to_string_pretty(&payload)?);
+        format::print_json_pretty_filtered(&payload)?;
         return Ok(());
     }
 

@@ -14,6 +14,7 @@ use crate::cli::{McpArgs, PolicyMode};
 use crate::client::XClient;
 use crate::config::Config;
 use crate::costs;
+use crate::errors::XintError;
 use crate::mcp_dispatcher::{resolve_tool_route, McpToolRoute};
 use crate::models::Tweet;
 use crate::policy;
@@ -30,6 +31,8 @@ pub struct MCPTool {
     pub description: String,
     #[serde(rename = "inputSchema")]
     pub input_schema: serde_json::Value,
+    #[serde(rename = "outputSchema", skip_serializing_if = "Option::is_none")]
+    pub output_schema: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,6 +97,62 @@ impl MCPServer {
         }
     }
 
+    pub fn get_tools_static() -> Vec<MCPTool> {
+        Self::get_tools()
+    }
+
+    fn meta_schema() -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "latency_ms": { "type": "number" },
+                "cached": { "type": "boolean" },
+                "estimated_cost_usd": { "type": "number" }
+            }
+        })
+    }
+
+    fn pagination_schema() -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "total": { "type": "number" },
+                "returned": { "type": "number" },
+                "has_more": { "type": "boolean" }
+            }
+        })
+    }
+
+    fn tweet_list_output() -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "type": { "type": "string", "enum": ["success", "info", "error"] },
+                "message": { "type": "string" },
+                "data": {
+                    "type": "object",
+                    "properties": {
+                        "tweets": { "type": "array", "items": { "type": "object" } },
+                        "pagination": Self::pagination_schema()
+                    }
+                },
+                "_meta": Self::meta_schema()
+            }
+        })
+    }
+
+    fn simple_output() -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "type": { "type": "string", "enum": ["success", "info", "error"] },
+                "message": { "type": "string" },
+                "data": { "type": "object" },
+                "_meta": Self::meta_schema()
+            }
+        })
+    }
+
     fn get_tools() -> Vec<MCPTool> {
         vec![
             MCPTool {
@@ -106,9 +165,12 @@ impl MCPServer {
                         "limit": { "type": "number", "description": "Max results (default: 15)" },
                         "since": { "type": "string", "description": "Time filter: 1h, 1d, 7d" },
                         "sort": { "type": "string", "enum": ["likes", "retweets", "recent"], "description": "Sort order" },
+                        "no_replies": { "type": "boolean", "description": "Exclude replies (default: false)" },
+                        "no_retweets": { "type": "boolean", "description": "Exclude retweets (default: false)" },
                     },
                     "required": ["query"]
                 }),
+                output_schema: Some(Self::tweet_list_output()),
             },
             MCPTool {
                 name: "xint_profile".to_string(),
@@ -118,9 +180,12 @@ impl MCPServer {
                     "properties": {
                         "username": { "type": "string", "description": "Twitter username (without @)" },
                         "count": { "type": "number", "description": "Number of tweets (default: 20)" },
+                        "include_replies": { "type": "boolean", "description": "Include replies (default: true)" },
+                        "no_retweets": { "type": "boolean", "description": "Exclude retweets (default: false)" },
                     },
                     "required": ["username"]
                 }),
+                output_schema: Some(Self::tweet_list_output()),
             },
             MCPTool {
                 name: "xint_thread".to_string(),
@@ -133,6 +198,7 @@ impl MCPServer {
                     },
                     "required": ["tweet_id"]
                 }),
+                output_schema: Some(Self::tweet_list_output()),
             },
             MCPTool {
                 name: "xint_tweet".to_string(),
@@ -144,6 +210,7 @@ impl MCPServer {
                     },
                     "required": ["tweet_id"]
                 }),
+                output_schema: Some(Self::simple_output()),
             },
             MCPTool {
                 name: "xint_trends".to_string(),
@@ -155,6 +222,7 @@ impl MCPServer {
                         "limit": { "type": "number", "description": "Number of trends (default: 20)" },
                     },
                 }),
+                output_schema: Some(Self::simple_output()),
             },
             MCPTool {
                 name: "xint_xsearch".to_string(),
@@ -167,6 +235,7 @@ impl MCPServer {
                     },
                     "required": ["query"]
                 }),
+                output_schema: Some(Self::tweet_list_output()),
             },
             MCPTool {
                 name: "xint_collections_list".to_string(),
@@ -175,6 +244,7 @@ impl MCPServer {
                     "type": "object",
                     "properties": {},
                 }),
+                output_schema: Some(Self::simple_output()),
             },
             MCPTool {
                 name: "xint_analyze".to_string(),
@@ -187,6 +257,7 @@ impl MCPServer {
                     },
                     "required": ["query"]
                 }),
+                output_schema: Some(Self::simple_output()),
             },
             MCPTool {
                 name: "xint_article".to_string(),
@@ -200,6 +271,7 @@ impl MCPServer {
                     },
                     "required": ["url"]
                 }),
+                output_schema: Some(Self::simple_output()),
             },
             MCPTool {
                 name: "xint_collections_search".to_string(),
@@ -213,6 +285,7 @@ impl MCPServer {
                     },
                     "required": ["collection_id", "query"]
                 }),
+                output_schema: Some(Self::simple_output()),
             },
             MCPTool {
                 name: "xint_bookmarks".to_string(),
@@ -224,6 +297,7 @@ impl MCPServer {
                         "since": { "type": "string", "description": "Filter by recency: 1h, 1d, 7d" },
                     },
                 }),
+                output_schema: Some(Self::tweet_list_output()),
             },
             MCPTool {
                 name: "xint_package_create".to_string(),
@@ -252,6 +326,7 @@ impl MCPServer {
                     },
                     "required": ["name", "topic_query", "sources", "time_window", "policy", "analysis_profile"]
                 }),
+                output_schema: Some(Self::simple_output()),
             },
             MCPTool {
                 name: "xint_package_status".to_string(),
@@ -263,6 +338,7 @@ impl MCPServer {
                     },
                     "required": ["package_id"]
                 }),
+                output_schema: Some(Self::simple_output()),
             },
             MCPTool {
                 name: "xint_package_query".to_string(),
@@ -283,6 +359,7 @@ impl MCPServer {
                     },
                     "required": ["query", "package_ids"]
                 }),
+                output_schema: Some(Self::simple_output()),
             },
             MCPTool {
                 name: "xint_package_refresh".to_string(),
@@ -297,6 +374,7 @@ impl MCPServer {
                     },
                     "required": ["package_id", "reason"]
                 }),
+                output_schema: Some(Self::simple_output()),
             },
             MCPTool {
                 name: "xint_package_search".to_string(),
@@ -310,6 +388,7 @@ impl MCPServer {
                     },
                     "required": ["query"]
                 }),
+                output_schema: Some(Self::simple_output()),
             },
             MCPTool {
                 name: "xint_package_publish".to_string(),
@@ -323,6 +402,7 @@ impl MCPServer {
                     },
                     "required": ["package_id", "snapshot_version"]
                 }),
+                output_schema: Some(Self::simple_output()),
             },
             MCPTool {
                 name: "xint_cache_clear".to_string(),
@@ -331,6 +411,7 @@ impl MCPServer {
                     "type": "object",
                     "properties": {},
                 }),
+                output_schema: Some(Self::simple_output()),
             },
             MCPTool {
                 name: "xint_watch".to_string(),
@@ -344,6 +425,7 @@ impl MCPServer {
                     },
                     "required": ["query"]
                 }),
+                output_schema: Some(Self::tweet_list_output()),
             },
             MCPTool {
                 name: "xint_diff".to_string(),
@@ -356,6 +438,7 @@ impl MCPServer {
                     },
                     "required": ["username"]
                 }),
+                output_schema: Some(Self::simple_output()),
             },
             MCPTool {
                 name: "xint_report".to_string(),
@@ -370,6 +453,7 @@ impl MCPServer {
                     },
                     "required": ["topic"]
                 }),
+                output_schema: Some(Self::simple_output()),
             },
             MCPTool {
                 name: "xint_sentiment".to_string(),
@@ -381,6 +465,7 @@ impl MCPServer {
                     },
                     "required": ["tweets"]
                 }),
+                output_schema: Some(Self::simple_output()),
             },
             MCPTool {
                 name: "xint_costs".to_string(),
@@ -391,6 +476,7 @@ impl MCPServer {
                         "period": { "type": "string", "enum": ["today", "week", "month", "all"], "description": "Time period (default: today)" },
                     },
                 }),
+                output_schema: Some(Self::simple_output()),
             },
         ]
     }
@@ -433,14 +519,18 @@ impl MCPServer {
         if policy::is_allowed(self.policy_mode, required) {
             return Ok(());
         }
-        Err(serde_json::json!({
-            "code": "POLICY_DENIED",
-            "message": format!("MCP tool '{}' requires '{}' policy mode", name, policy::as_str(required)),
-            "tool": name,
-            "policy_mode": policy::as_str(self.policy_mode),
-            "required_mode": policy::as_str(required),
-        })
-        .to_string())
+        let structured = XintError::policy_denied(
+            name,
+            policy::as_str(self.policy_mode),
+            policy::as_str(required),
+        );
+        Err(serde_json::to_string(&structured).unwrap_or_else(|_| {
+            format!(
+                "MCP tool '{}' requires '{}' policy mode",
+                name,
+                policy::as_str(required)
+            )
+        }))
     }
 
     fn ensure_budget_allowed(&self, name: &str) -> Result<(), String> {
@@ -451,18 +541,13 @@ impl MCPServer {
         if budget.allowed {
             return Ok(());
         }
-        Err(serde_json::json!({
-            "code": "BUDGET_DENIED",
-            "message": format!(
+        let structured = XintError::budget_denied(budget.spent, budget.limit);
+        Err(serde_json::to_string(&structured).unwrap_or_else(|_| {
+            format!(
                 "Daily budget exceeded (${:.2} / ${:.2})",
                 budget.spent, budget.limit
-            ),
-            "tool": name,
-            "spent_usd": budget.spent,
-            "limit_usd": budget.limit,
-            "remaining_usd": budget.remaining,
-        })
-        .to_string())
+            )
+        }))
     }
 
     fn package_api_base_url() -> Option<String> {
@@ -726,12 +811,14 @@ impl MCPServer {
                             reliability::ReliabilityMode::Mcp,
                             false,
                         );
+                        let structured = XintError::classify(&err);
                         let response = serde_json::json!({
                             "jsonrpc": "2.0",
                             "id": id,
                             "error": {
                                 "code": -32603,
-                                "message": err
+                                "message": err,
+                                "data": structured,
                             }
                         });
                         Ok(Some(response.to_string()))
@@ -1769,15 +1856,24 @@ mod tests {
         LOCK.get_or_init(|| Mutex::new(()))
     }
 
+    fn env_guard() -> std::sync::MutexGuard<'static, ()> {
+        env_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     fn save_env(key: &str) -> Option<String> {
         env::var(key).ok()
     }
 
     fn restore_env(key: &str, value: Option<String>) {
-        if let Some(v) = value {
-            env::set_var(key, v);
-        } else {
-            env::remove_var(key);
+        // SAFETY: tests run sequentially under env_lock() mutex
+        unsafe {
+            if let Some(v) = value {
+                env::set_var(key, v);
+            } else {
+                env::remove_var(key);
+            }
         }
     }
 
@@ -1854,16 +1950,19 @@ mod tests {
 
     #[tokio::test]
     async fn package_create_contract_request_includes_headers_and_payload() {
-        let _guard = env_lock().lock().expect("env lock");
+        let _guard = env_guard();
         let prev_base = save_env("XINT_PACKAGE_API_BASE_URL");
         let prev_key = save_env("XINT_PACKAGE_API_KEY");
         let prev_workspace = save_env("XINT_WORKSPACE_ID");
 
         let (base_url, req_rx, server_task) =
             spawn_mock_server(202, r#"{"package_id":"pkg_123","status":"queued"}"#).await;
-        env::set_var("XINT_PACKAGE_API_BASE_URL", base_url);
-        env::set_var("XINT_PACKAGE_API_KEY", "xck_contract");
-        env::set_var("XINT_WORKSPACE_ID", "ws_contract");
+        // SAFETY: tests run sequentially under env_lock() mutex
+        unsafe {
+            env::set_var("XINT_PACKAGE_API_BASE_URL", base_url);
+            env::set_var("XINT_PACKAGE_API_KEY", "xck_contract");
+            env::set_var("XINT_WORKSPACE_ID", "ws_contract");
+        }
 
         let server = MCPServer::new(
             PolicyMode::ReadOnly,
@@ -1909,7 +2008,7 @@ mod tests {
 
     #[tokio::test]
     async fn quota_error_includes_upgrade_url() {
-        let _guard = env_lock().lock().expect("env lock");
+        let _guard = env_guard();
         let prev_base = save_env("XINT_PACKAGE_API_BASE_URL");
         let prev_upgrade = save_env("XINT_BILLING_UPGRADE_URL");
 
@@ -1918,11 +2017,14 @@ mod tests {
             r#"{"code":"QUOTA_EXCEEDED","error":"Package limit reached for current plan."}"#,
         )
         .await;
-        env::set_var("XINT_PACKAGE_API_BASE_URL", base_url);
-        env::set_var(
-            "XINT_BILLING_UPGRADE_URL",
-            "https://xint.dev/pricing?src=contract-test",
-        );
+        // SAFETY: tests run sequentially under env_lock() mutex
+        unsafe {
+            env::set_var("XINT_PACKAGE_API_BASE_URL", base_url);
+            env::set_var(
+                "XINT_BILLING_UPGRADE_URL",
+                "https://xint.dev/pricing?src=contract-test",
+            );
+        }
 
         let server = MCPServer::new(
             PolicyMode::ReadOnly,
@@ -1950,7 +2052,7 @@ mod tests {
 
     #[tokio::test]
     async fn package_query_requires_citations_when_requested() {
-        let _guard = env_lock().lock().expect("env lock");
+        let _guard = env_guard();
         let prev_base = save_env("XINT_PACKAGE_API_BASE_URL");
 
         let (base_url, _req_rx, server_task) = spawn_mock_server(
@@ -1958,7 +2060,10 @@ mod tests {
             r#"{"answer":"No citations","claims":[{"claim_id":"claim_1","text":"example"}],"citations":[]}"#,
         )
         .await;
-        env::set_var("XINT_PACKAGE_API_BASE_URL", base_url);
+        // SAFETY: tests run sequentially under env_lock() mutex
+        unsafe {
+            env::set_var("XINT_PACKAGE_API_BASE_URL", base_url);
+        }
 
         let server = MCPServer::new(
             PolicyMode::ReadOnly,
@@ -2024,9 +2129,12 @@ mod tests {
 
     #[tokio::test]
     async fn core_search_tool_requires_bearer_token() {
-        let _guard = env_lock().lock().expect("env lock");
+        let _guard = env_guard();
         let prev_bearer = save_env("X_BEARER_TOKEN");
-        env::remove_var("X_BEARER_TOKEN");
+        // SAFETY: tests run sequentially under env_lock() mutex
+        unsafe {
+            env::set_var("X_BEARER_TOKEN", "");
+        }
 
         let server = MCPServer::new(
             PolicyMode::ReadOnly,
@@ -2046,9 +2154,12 @@ mod tests {
 
     #[tokio::test]
     async fn analyze_tool_requires_xai_api_key() {
-        let _guard = env_lock().lock().expect("env lock");
+        let _guard = env_guard();
         let prev_key = save_env("XAI_API_KEY");
-        env::remove_var("XAI_API_KEY");
+        // SAFETY: tests run sequentially under env_lock() mutex
+        unsafe {
+            env::set_var("XAI_API_KEY", "");
+        }
 
         let server = MCPServer::new(
             PolicyMode::ReadOnly,

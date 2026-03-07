@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use crate::cli::CapabilitiesArgs;
 use crate::costs;
+use crate::format;
 
 const PRICING_OPERATIONS: &[&str] = &[
     "bookmark_remove",
@@ -140,7 +141,7 @@ pub fn run(args: &CapabilitiesArgs) -> Result<()> {
     if args.compact {
         println!("{}", serde_json::to_string(&payload)?);
     } else {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
+        format::print_json_pretty_filtered(&payload)?;
     }
     Ok(())
 }

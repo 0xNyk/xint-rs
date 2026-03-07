@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use crate::api::xai;
 use crate::cli::CollectionsArgs;
 use crate::config::Config;
+use crate::format;
 
 pub async fn run(args: &CollectionsArgs, config: &Config) -> Result<()> {
     let http = reqwest::Client::new();
@@ -33,7 +34,7 @@ pub async fn run(args: &CollectionsArgs, config: &Config) -> Result<()> {
 async fn cmd_list(http: &reqwest::Client, config: &Config) -> Result<()> {
     let key = config.require_xai_management_key()?;
     let res = xai::collections_list(http, key).await?;
-    println!("{}", serde_json::to_string_pretty(&res)?);
+    format::print_json_pretty_filtered(&res)?;
     Ok(())
 }
 
@@ -43,7 +44,7 @@ async fn cmd_create(http: &reqwest::Client, config: &Config, parts: &[String]) -
         .ok_or_else(|| anyhow::anyhow!("--name required for 'collections create'"))?;
     let desc = find_flag(parts, "--description").unwrap_or_default();
     let res = xai::collections_create(http, key, &name, &desc).await?;
-    println!("{}", serde_json::to_string_pretty(&res)?);
+    format::print_json_pretty_filtered(&res)?;
     Ok(())
 }
 
@@ -53,7 +54,7 @@ async fn cmd_ensure(http: &reqwest::Client, config: &Config, parts: &[String]) -
         .ok_or_else(|| anyhow::anyhow!("--name required for 'collections ensure'"))?;
     let desc = find_flag(parts, "--description").unwrap_or_default();
     let res = xai::collections_ensure(http, key, &name, &desc).await?;
-    println!("{}", serde_json::to_string_pretty(&res)?);
+    format::print_json_pretty_filtered(&res)?;
     Ok(())
 }
 
@@ -64,7 +65,7 @@ async fn cmd_add_document(http: &reqwest::Client, config: &Config, parts: &[Stri
     let document_id = find_flag(parts, "--document-id")
         .ok_or_else(|| anyhow::anyhow!("--document-id required"))?;
     let res = xai::collections_add_document(http, key, &collection_id, &document_id).await?;
-    println!("{}", serde_json::to_string_pretty(&res)?);
+    format::print_json_pretty_filtered(&res)?;
     Ok(())
 }
 
@@ -80,7 +81,7 @@ async fn cmd_upload(http: &reqwest::Client, config: &Config, parts: &[String]) -
     }
 
     let res = xai::files_upload(http, api_key, &path, &purpose).await?;
-    println!("{}", serde_json::to_string_pretty(&res)?);
+    format::print_json_pretty_filtered(&res)?;
     Ok(())
 }
 
@@ -102,7 +103,7 @@ async fn cmd_search(
     let top_k = args.top_k;
 
     let res = xai::documents_search(http, api_key, &collection_ids, &query, top_k).await?;
-    println!("{}", serde_json::to_string_pretty(&res)?);
+    format::print_json_pretty_filtered(&res)?;
     Ok(())
 }
 

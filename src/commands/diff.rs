@@ -8,6 +8,7 @@ use crate::cli::DiffArgs;
 use crate::client::XClient;
 use crate::config::Config;
 use crate::costs;
+use crate::format;
 use crate::models::*;
 
 pub async fn run(args: &DiffArgs, config: &Config, client: &XClient) -> Result<()> {
@@ -116,7 +117,7 @@ pub async fn run(args: &DiffArgs, config: &Config, client: &XClient) -> Result<(
         let diff = compute_diff(&prev, &current);
 
         if args.json {
-            println!("{}", serde_json::to_string_pretty(&diff)?);
+            format::print_json_pretty_filtered(&diff)?;
         } else {
             println!("{}", format_diff(&diff, snap_type));
         }
@@ -130,7 +131,7 @@ pub async fn run(args: &DiffArgs, config: &Config, client: &XClient) -> Result<(
         println!("Run again later to see changes.");
 
         if args.json {
-            println!("{}", serde_json::to_string_pretty(&current)?);
+            format::print_json_pretty_filtered(&current)?;
         } else {
             let mut sorted = users;
             sorted.sort_by(|a, b| {
