@@ -27,6 +27,13 @@ pub fn cost_rate(operation: &str) -> (f64, f64) {
         "list_members_list" | "list_members_add" | "list_members_remove" => (0.0, 0.01),
         "blocks_list" | "blocks_add" | "blocks_remove" => (0.0, 0.01),
         "mutes_list" | "mutes_add" | "mutes_remove" => (0.0, 0.01),
+        // xAI/Grok — rough estimates; actual cost tracked via track_cost_direct()
+        "grok_chat" => (0.0, 0.001),
+        "grok_analyze" => (0.0, 0.002),
+        "grok_vision" => (0.0, 0.005),
+        "grok_sentiment" => (0.0, 0.001),
+        "xai_article" => (0.0, 0.003),
+        "xai_x_search" => (0.0, 0.002),
         _ => (0.005, 0.0),
     }
 }
@@ -122,6 +129,69 @@ pub fn track_cost(
             total_cost: cost_usd,
             calls: 1,
             tweets_read,
+            by_operation,
+        });
+        data.daily.sort_by(|a, b| a.date.cmp(&b.date));
+    }
+
+    prune_entries(&mut data);
+    save_data(costs_path, &data);
+
+    entry
+}
+
+/// Track a cost entry with an explicit USD amount (for token-based xAI/Grok costs).
+pub fn track_cost_direct(
+    costs_path: &Path,
+    operation: &str,
+    endpoint: &str,
+    cost_usd: f64,
+) -> CostEntry {
+    let cost_usd = (cost_usd * 1e6).round() / 1e6;
+
+    let entry = CostEntry {
+        timestamp: chrono::Utc::now().to_rfc3339(),
+        operation: operation.to_string(),
+        endpoint: endpoint.to_string(),
+        tweets_read: 0,
+        cost_usd,
+    };
+
+    let mut data = load_data(costs_path);
+    data.entries.push(entry.clone());
+    data.total_lifetime_usd = ((data.total_lifetime_usd + cost_usd) * 1e6).round() / 1e6;
+
+    let day = &entry.timestamp[..10];
+    let agg = data.daily.iter_mut().find(|d| d.date == day);
+
+    if let Some(agg) = agg {
+        agg.total_cost += cost_usd;
+        agg.calls += 1;
+        let op = agg
+            .by_operation
+            .entry(operation.to_string())
+            .or_insert(OperationStats {
+                calls: 0,
+                cost: 0.0,
+                tweets: 0,
+            });
+        op.calls += 1;
+        op.cost += cost_usd;
+    } else {
+        let mut by_operation = HashMap::new();
+        by_operation.insert(
+            operation.to_string(),
+            OperationStats {
+                calls: 1,
+                cost: cost_usd,
+                tweets: 0,
+            },
+        );
+        data.daily.push(DailyAggregate {
+            date: day.to_string(),
+            total_cost: cost_usd,
+            calls: 1,
+            tweets_read: 0,
             by_operation,
         });
         data.daily.sort_by(|a, b| a.date.cmp(&b.date));

@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::costs::{cost_rate, track_cost, check_budget, set_budget, get_cost_summary};
+    use crate::costs::{cost_rate, track_cost, track_cost_direct, check_budget, set_budget, get_cost_summary};
     use std::path::PathBuf;
     use std::fs;
 
@@ -36,6 +36,34 @@ mod tests {
         let (per_tweet, per_call) = cost_rate("unknown_operation");
         assert_eq!(per_tweet, 0.005); // fallback
         assert_eq!(per_call, 0.0);
+    }
+
+    #[test]
+    fn test_cost_rate_grok() {
+        let (per_tweet, per_call) = cost_rate("grok_chat");
+        assert_eq!(per_tweet, 0.0);
+        assert_eq!(per_call, 0.001);
+
+        let (per_tweet, per_call) = cost_rate("grok_vision");
+        assert_eq!(per_tweet, 0.0);
+        assert_eq!(per_call, 0.005);
+
+        let (per_tweet, per_call) = cost_rate("xai_article");
+        assert_eq!(per_tweet, 0.0);
+        assert_eq!(per_call, 0.003);
+    }
+
+    #[test]
+    fn test_track_cost_direct() {
+        let path = test_data_path();
+
+        let entry = track_cost_direct(&path, "grok_chat", "https://api.x.ai/v1/chat/completions", 0.0042);
+
+        assert_eq!(entry.operation, "grok_chat");
+        assert_eq!(entry.tweets_read, 0);
+        assert!((entry.cost_usd - 0.0042).abs() < 0.000001);
+
+        let _ = fs::remove_file(&path);
     }
 
     #[test]

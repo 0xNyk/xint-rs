@@ -85,12 +85,13 @@ pub async fn run(args: &ArticleArgs, config: &Config) -> Result<()> {
 
         let xai_key = config.require_xai_key()?;
         let http = reqwest::Client::new();
-        let analysis = grok::analyze_query(
+        let analysis = grok::analyze_query_tracked(
             &http,
             xai_key,
             ai_prompt,
             Some(&article.content),
             &crate::models::GrokOpts::default(),
+            Some(&config.costs_path()),
         )
         .await?;
 

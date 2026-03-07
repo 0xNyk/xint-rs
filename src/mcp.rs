@@ -1334,11 +1334,11 @@ impl MCPServer {
                 let response = if let Some(tweets_raw) = args.get("tweets") {
                     let tweets: Vec<Tweet> = serde_json::from_value(tweets_raw.clone())
                         .map_err(|e| format!("Invalid tweets payload for analyze: {e}"))?;
-                    grok::analyze_tweets(&http, &api_key, &tweets, Some(query), &opts)
+                    grok::analyze_tweets_tracked(&http, &api_key, &tweets, Some(query), &opts, Some(&self.costs_path))
                         .await
                         .map_err(|e| format!("Analyze tweets failed: {e}"))?
                 } else {
-                    grok::analyze_query(&http, &api_key, query, None, &opts)
+                    grok::analyze_query_tracked(&http, &api_key, query, None, &opts, Some(&self.costs_path))
                         .await
                         .map_err(|e| format!("Analyze query failed: {e}"))?
                 };
@@ -1742,7 +1742,7 @@ impl MCPServer {
                         .map_err(|e| format!("Invalid tweets payload for sentiment: {e}"))?;
                     let model = args.get("model").and_then(|v| v.as_str());
                     let http = reqwest::Client::new();
-                    let results = sentiment::analyze_sentiment(&http, &api_key, &tweets, model)
+                    let results = sentiment::analyze_sentiment(&http, &api_key, &tweets, model, Some(&self.costs_path))
                         .await
                         .map_err(|e| format!("Sentiment analysis failed: {e}"))?;
                     let stats = sentiment::compute_stats(&results);
