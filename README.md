@@ -418,17 +418,11 @@ Notes behavior is controlled by the canonical script:
 
 See [SECURITY.md](docs/security.md).
 
-## License
 
-[MIT](LICENSE) · [0xNyk](https://github.com/0xNyk)
 
----
+## Contributing
 
-<p align="center">
-  <a href="https://star-history.com/#0xNyk/xint-rs&Date">
-    <img src="https://api.star-history.com/svg?repos=0xNyk/xint-rs&type=Date" alt="Star History" width="400">
-  </a>
-</p>
+Contributions welcome. Read the [contribution guidelines](CONTRIBUTING.md) first.
 
 ## ❤️ Support the Project
 
@@ -439,3 +433,19 @@ If you find this project useful, consider supporting my open-source work.
 **Solana donations**
 
 `BYLu8XD8hGDUtdRBWpGWu5HKoiPrWqCxYFSh4oxXuvPg`
+
+## License
+
+[![CC0](https://licensebuttons.net/p/zero/1.0/88x31.png)](https://creativecommons.org/publicdomain/zero/1.0/)
+
+To the extent possible under law, the authors have waived all copyright and
+related or neighboring rights to this work.
+
+---
+
+<p align="center">
+  <a href="https://star-history.com/#0xNyk/xint-rs&Date">
+    <img src="https://api.star-history.com/svg?repos=0xNyk/xint-rs&type=Date" alt="Star History" width="400">
+  </a>
+</p>
+
