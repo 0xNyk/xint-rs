@@ -197,6 +197,23 @@ pub enum Commands {
     #[command(alias = "mcp-server")]
     Mcp(McpArgs),
 
+    /// Account performance analytics dashboard
+    #[command(alias = "stats")]
+    Analytics(AnalyticsArgs),
+
+    /// Best performing tweets by engagement
+    Top(TopArgs),
+
+    /// Follower growth velocity and trend analysis
+    Growth(GrowthArgs),
+
+    /// Best posting times based on engagement patterns
+    Timing(TimingArgs),
+
+    /// AI-powered content audit with recommendations
+    #[command(alias = "audit")]
+    ContentAudit(ContentAuditArgs),
+
     /// Generate shell completions
     Completions(CompletionsArgs),
 }
@@ -903,6 +920,110 @@ pub struct CollectionsArgs {
     /// Top-K results for document search
     #[arg(long, default_value = "8")]
     pub top_k: u32,
+}
+
+// ---------------------------------------------------------------------------
+// Analytics
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+#[command(after_help = "Examples:\n  xint analytics --since 7d\n  xint analytics --since 30d --json\n  xint analytics --save")]
+pub struct AnalyticsArgs {
+    /// Time window (e.g. 7d, 30d, 24h)
+    #[arg(long, default_value = "7d")]
+    pub since: String,
+
+    /// JSON output
+    #[arg(long)]
+    pub json: bool,
+
+    /// Save results to exports
+    #[arg(long)]
+    pub save: bool,
+}
+
+// ---------------------------------------------------------------------------
+// ContentAudit
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+#[command(after_help = "Examples:\n  xint content-audit --since 30d\n  xint audit --save\n  xint audit --model grok-4")]
+pub struct ContentAuditArgs {
+    /// Time window (e.g. 7d, 30d)
+    #[arg(long, default_value = "30d")]
+    pub since: String,
+
+    /// Save audit report to exports
+    #[arg(long)]
+    pub save: bool,
+
+    /// Grok model to use
+    #[arg(long, default_value = "grok-4-1-fast")]
+    pub model: String,
+}
+
+// ---------------------------------------------------------------------------
+// Growth
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+#[command(after_help = "Examples:\n  xint growth --history\n  xint growth --velocity\n  xint growth --json")]
+pub struct GrowthArgs {
+    /// Show snapshot history
+    #[arg(long)]
+    pub history: bool,
+
+    /// Show velocity (followers/day)
+    #[arg(long)]
+    pub velocity: bool,
+
+    /// JSON output
+    #[arg(long)]
+    pub json: bool,
+}
+
+// ---------------------------------------------------------------------------
+// Timing
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+#[command(after_help = "Examples:\n  xint timing --since 30d\n  xint timing --json")]
+pub struct TimingArgs {
+    /// Time window (e.g. 7d, 30d)
+    #[arg(long, default_value = "30d")]
+    pub since: String,
+
+    /// JSON output
+    #[arg(long)]
+    pub json: bool,
+}
+
+// ---------------------------------------------------------------------------
+// Top
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+#[command(after_help = "Examples:\n  xint top --since 7d --by likes --limit 10\n  xint top --since 30d --type thread\n  xint top --json")]
+pub struct TopArgs {
+    /// Sort metric: engagement_rate, likes, impressions, retweets
+    #[arg(long, default_value = "engagement_rate")]
+    pub by: String,
+
+    /// Max tweets to show
+    #[arg(long, default_value = "10")]
+    pub limit: usize,
+
+    /// Time window (e.g. 7d, 30d, 24h)
+    #[arg(long, default_value = "7d")]
+    pub since: String,
+
+    /// Filter by content type: thread, media, single
+    #[arg(long, rename_all = "snake_case")]
+    pub r#type: Option<String>,
+
+    /// JSON output
+    #[arg(long)]
+    pub json: bool,
 }
 
 // ---------------------------------------------------------------------------

@@ -55,6 +55,11 @@ pub fn command_name(cmd: &Commands) -> &'static str {
         Commands::XSearch(_) => "x-search",
         Commands::Collections(_) => "collections",
         Commands::Mcp(_) => "mcp",
+        Commands::Analytics(_) => "analytics",
+        Commands::Top(_) => "top",
+        Commands::Growth(_) => "growth",
+        Commands::Timing(_) => "timing",
+        Commands::ContentAudit(_) => "content-audit",
         Commands::Completions(_) => "completions",
     }
 }

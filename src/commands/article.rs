@@ -385,6 +385,8 @@ mod tests {
             hashtags: vec![],
             tweet_url: "https://x.com/alice/status/1900100012345678901".to_string(),
             article: None,
+            organic_metrics: None,
+            non_public_metrics: None,
         }
     }
 

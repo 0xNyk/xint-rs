@@ -170,6 +170,11 @@ async fn main() -> Result<()> {
         Some(Commands::Cache(args)) => commands::cache_cmd::run(&args, &config),
         Some(Commands::XSearch(args)) => commands::x_search::run(&args, &config).await,
         Some(Commands::Collections(args)) => commands::collections::run(&args, &config).await,
+        Some(Commands::Analytics(args)) => commands::analytics::run(&args, &config, &client).await,
+        Some(Commands::Top(args)) => commands::top::run(&args, &config, &client).await,
+        Some(Commands::Growth(args)) => commands::growth::run(&args, &config).await,
+        Some(Commands::Timing(args)) => commands::timing::run(&args, &config, &client).await,
+        Some(Commands::ContentAudit(args)) => commands::content_audit::run(&args, &config, &client).await,
         Some(Commands::Mcp(args)) => mcp::run(args, &config, cli.policy).await,
         Some(Commands::Completions(args)) => {
             use clap::CommandFactory;

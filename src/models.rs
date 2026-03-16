@@ -58,6 +58,21 @@ pub struct TweetArticle {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrganicMetrics {
+    pub impression_count: u64,
+    pub like_count: u64,
+    pub reply_count: u64,
+    pub retweet_count: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NonPublicMetrics {
+    pub impression_count: u64,
+    pub url_link_clicks: u64,
+    pub user_profile_clicks: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tweet {
     pub id: String,
     pub text: String,
@@ -73,6 +88,10 @@ pub struct Tweet {
     pub tweet_url: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub article: Option<TweetArticle>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub organic_metrics: Option<OrganicMetrics>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub non_public_metrics: Option<NonPublicMetrics>,
 }
 
 // ---------------------------------------------------------------------------

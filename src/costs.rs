@@ -36,6 +36,9 @@ pub fn cost_rate(operation: &str) -> (f64, f64) {
         "grok_sentiment" => (0.0, 0.001),
         "xai_article" => (0.0, 0.0015),
         "xai_x_search" => (0.0, 0.001),
+        "timeline" => (0.005, 0.0),
+        "analytics" => (0.0, 0.01),
+        "content_audit" => (0.0, 0.001),
         _ => (0.005, 0.0),
     }
 }
