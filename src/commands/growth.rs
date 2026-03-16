@@ -11,7 +11,9 @@ pub async fn run(args: &GrowthArgs, config: &Config) -> Result<()> {
     let snapshots_dir = config.snapshots_dir();
 
     if !snapshots_dir.exists() {
-        println!("No snapshots found. Run 'xint diff @username' first to create follower snapshots.");
+        println!(
+            "No snapshots found. Run 'xint diff @username' first to create follower snapshots."
+        );
         return Ok(());
     }
 
@@ -34,7 +36,11 @@ pub async fn run(args: &GrowthArgs, config: &Config) -> Result<()> {
     let username = &snapshots[0].username;
 
     if args.history {
-        println!("\n{}  @{}\n", "Follower Snapshot History".bold(), username.cyan());
+        println!(
+            "\n{}  @{}\n",
+            "Follower Snapshot History".bold(),
+            username.cyan()
+        );
         for snap in &snapshots {
             let date = if snap.timestamp.len() >= 10 {
                 &snap.timestamp[..10]
@@ -52,7 +58,10 @@ pub async fn run(args: &GrowthArgs, config: &Config) -> Result<()> {
     println!("\n{}  @{}\n", "Follower Growth".bold(), username.cyan());
 
     if let Some(ref vel) = data.velocity {
-        println!("  Current:    {} followers", data.current_count.to_string().yellow());
+        println!(
+            "  Current:    {} followers",
+            data.current_count.to_string().yellow()
+        );
         println!("  Period:     {} days", vel.days);
         println!(
             "  Change:     {} ({})",
@@ -62,7 +71,9 @@ pub async fn run(args: &GrowthArgs, config: &Config) -> Result<()> {
         println!("  Trend:      {}", format_trend(&vel.trend));
 
         if vel.per_day > 0.0 {
-            let milestones = [1_000, 5_000, 10_000, 25_000, 50_000, 100_000, 500_000, 1_000_000];
+            let milestones = [
+                1_000, 5_000, 10_000, 25_000, 50_000, 100_000, 500_000, 1_000_000,
+            ];
             let current = data.current_count as f64;
             for m in milestones {
                 if m as f64 > current {
@@ -77,7 +88,10 @@ pub async fn run(args: &GrowthArgs, config: &Config) -> Result<()> {
             }
         }
     } else {
-        println!("  Current: {} followers", data.current_count.to_string().yellow());
+        println!(
+            "  Current: {} followers",
+            data.current_count.to_string().yellow()
+        );
         println!("  Only 1 snapshot available. Run 'xint diff @username' again later for trends.");
     }
 
@@ -162,10 +176,7 @@ fn build_growth_data(snapshots: &[Snapshot]) -> GrowthData {
     }
 }
 
-fn load_all_snapshots(
-    dir: &std::path::Path,
-    snap_type: &str,
-) -> Result<Vec<Snapshot>> {
+fn load_all_snapshots(dir: &std::path::Path, snap_type: &str) -> Result<Vec<Snapshot>> {
     let mut snapshots = Vec::new();
 
     let entries = match fs::read_dir(dir) {

@@ -48,7 +48,10 @@ pub async fn run(args: &AnalyticsArgs, config: &Config, client: &XClient) -> Res
     if args.json {
         format::print_json_pretty_filtered(&stats)?;
     } else {
-        println!("{}", format_dashboard(&stats, &tokens.username, &args.since));
+        println!(
+            "{}",
+            format_dashboard(&stats, &tokens.username, &args.since)
+        );
     }
 
     if args.save {
@@ -121,8 +124,7 @@ fn engagement_rate(t: &Tweet) -> f64 {
     if t.metrics.impressions == 0 {
         return 0.0;
     }
-    let engagements =
-        t.metrics.likes + t.metrics.retweets + t.metrics.replies + t.metrics.quotes;
+    let engagements = t.metrics.likes + t.metrics.retweets + t.metrics.replies + t.metrics.quotes;
     engagements as f64 / t.metrics.impressions as f64 * 100.0
 }
 
@@ -223,7 +225,9 @@ fn compute_stats(tweets: &[Tweet]) -> AnalyticsStats {
             let likes: u64 = day_tweets.iter().map(|t| t.metrics.likes).sum();
             let total_eng: u64 = day_tweets
                 .iter()
-                .map(|t| t.metrics.likes + t.metrics.retweets + t.metrics.replies + t.metrics.quotes)
+                .map(|t| {
+                    t.metrics.likes + t.metrics.retweets + t.metrics.replies + t.metrics.quotes
+                })
                 .sum();
             let er = if impressions > 0 {
                 total_eng as f64 / impressions as f64 * 100.0

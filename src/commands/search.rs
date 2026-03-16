@@ -120,7 +120,15 @@ pub async fn run(args: &SearchArgs, config: &Config, client: &XClient) -> Result
         if let Ok(api_key) = config.require_xai_key() {
             let http = reqwest::Client::new();
             eprintln!("Running sentiment analysis...");
-            match sentiment::analyze_sentiment(&http, api_key, &tweets, None, Some(&config.costs_path())).await {
+            match sentiment::analyze_sentiment(
+                &http,
+                api_key,
+                &tweets,
+                None,
+                Some(&config.costs_path()),
+            )
+            .await
+            {
                 Ok(sentiments) => {
                     let stats = sentiment::compute_stats(&sentiments);
                     eprint!("{}", sentiment::format_stats(&stats, tweets.len()));

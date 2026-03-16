@@ -12,8 +12,7 @@ pub async fn run(args: &RepostsArgs, config: &Config, client: &XClient) -> Resul
 
     let spinner =
         crate::spinner::Spinner::new(&format!("Fetching reposts for tweet {}...", args.tweet_id));
-    let result =
-        twitter::get_reposts(client, token, &args.tweet_id, args.limit as u32).await;
+    let result = twitter::get_reposts(client, token, &args.tweet_id, args.limit as u32).await;
     match &result {
         Ok(users) => spinner.done(&format!("{} users reposted", users.len())),
         Err(_) => spinner.fail("Failed to fetch reposts"),

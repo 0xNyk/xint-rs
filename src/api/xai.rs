@@ -126,14 +126,20 @@ pub async fn x_search(
     if let Some(domains) = excluded_domains {
         if !domains.is_empty() {
             tool_spec["excluded_domains"] = serde_json::Value::Array(
-                domains.iter().map(|d| serde_json::Value::String(d.clone())).collect(),
+                domains
+                    .iter()
+                    .map(|d| serde_json::Value::String(d.clone()))
+                    .collect(),
             );
         }
     }
     if let Some(domains) = allowed_domains {
         if !domains.is_empty() {
             tool_spec["allowed_domains"] = serde_json::Value::Array(
-                domains.iter().map(|d| serde_json::Value::String(d.clone())).collect(),
+                domains
+                    .iter()
+                    .map(|d| serde_json::Value::String(d.clone()))
+                    .collect(),
             );
         }
     }
@@ -216,9 +222,7 @@ pub async fn x_search(
                                 part.get("annotations").and_then(|v| v.as_array())
                             {
                                 for ann in annotations {
-                                    if let Ok(c) =
-                                        serde_json::from_value::<Citation>(ann.clone())
-                                    {
+                                    if let Ok(c) = serde_json::from_value::<Citation>(ann.clone()) {
                                         citations.push(c);
                                     }
                                 }
