@@ -62,7 +62,7 @@ pub async fn run(args: &SearchArgs, config: &Config, client: &XClient) -> Result
     let mut cache_hit = false;
     let mut tweets = if let Some(cached) = cached {
         cache_hit = true;
-        eprintln!("(cached — {} tweets)", cached.len());
+        eprintln!("(cached \u{2014} {} tweets)", cached.len());
         cached
     } else {
         let sort_order = match args.sort.as_str() {
@@ -70,6 +70,7 @@ pub async fn run(args: &SearchArgs, config: &Config, client: &XClient) -> Result
             _ => "relevancy",
         };
 
+        let spinner = crate::spinner::Spinner::new(&format!("Searching \"{query}\"..."));
         let tweets = twitter::search(
             client,
             token,
@@ -80,7 +81,12 @@ pub async fn run(args: &SearchArgs, config: &Config, client: &XClient) -> Result
             args.until.as_deref(),
             args.full,
         )
-        .await?;
+        .await;
+        match &tweets {
+            Ok(t) => spinner.done(&format!("Found {} tweets", t.len())),
+            Err(_) => spinner.fail("Search failed"),
+        }
+        let tweets = tweets?;
 
         // Track cost
         costs::track_cost(

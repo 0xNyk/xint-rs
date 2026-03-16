@@ -80,6 +80,20 @@ impl XSearchResult {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Citation {
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub start_index: Option<u64>,
+    #[serde(default)]
+    pub end_index: Option<u64>,
+    #[serde(rename = "type", default)]
+    pub citation_type: Option<String>,
+}
+
 /// Call xAI Responses API with x_search tool to search X.
 #[allow(clippy::too_many_arguments)]
 pub async fn x_search(
@@ -91,7 +105,10 @@ pub async fn x_search(
     to_date: Option<&str>,
     model: &str,
     timeout_secs: u64,
-) -> Result<(Vec<XSearchResult>, String)> {
+    excluded_domains: Option<&[String]>,
+    allowed_domains: Option<&[String]>,
+    vision: bool,
+) -> Result<(Vec<XSearchResult>, String, Vec<Citation>)> {
     let mut tool_spec = serde_json::json!({
         "type": "x_search",
         "max_results": max_results,
@@ -105,6 +122,23 @@ pub async fn x_search(
         if !td.is_empty() {
             tool_spec["to_date"] = serde_json::Value::String(td.to_string());
         }
+    }
+    if let Some(domains) = excluded_domains {
+        if !domains.is_empty() {
+            tool_spec["excluded_domains"] = serde_json::Value::Array(
+                domains.iter().map(|d| serde_json::Value::String(d.clone())).collect(),
+            );
+        }
+    }
+    if let Some(domains) = allowed_domains {
+        if !domains.is_empty() {
+            tool_spec["allowed_domains"] = serde_json::Value::Array(
+                domains.iter().map(|d| serde_json::Value::String(d.clone())).collect(),
+            );
+        }
+    }
+    if vision {
+        tool_spec["enable_image_understanding"] = serde_json::Value::Bool(true);
     }
 
     let body = serde_json::json!({
@@ -147,9 +181,10 @@ pub async fn x_search(
 
     let data: serde_json::Value = res.json().await?;
 
-    // Extract x_search results + output text from Responses API format
+    // Extract x_search results + output text + citations from Responses API format
     let mut results = Vec::new();
     let mut output_text = String::new();
+    let mut citations: Vec<Citation> = Vec::new();
 
     if let Some(output) = data.get("output").and_then(|v| v.as_array()) {
         for item in output {
@@ -176,6 +211,18 @@ pub async fn x_search(
                                     parts.push(trimmed.to_string());
                                 }
                             }
+                            // Extract annotations/citations from output_text parts
+                            if let Some(annotations) =
+                                part.get("annotations").and_then(|v| v.as_array())
+                            {
+                                for ann in annotations {
+                                    if let Ok(c) =
+                                        serde_json::from_value::<Citation>(ann.clone())
+                                    {
+                                        citations.push(c);
+                                    }
+                                }
+                            }
                         }
                     }
                     if !parts.is_empty() {
@@ -186,7 +233,7 @@ pub async fn x_search(
         }
     }
 
-    Ok((results, output_text))
+    Ok((results, output_text, citations))
 }
 
 // ---------------------------------------------------------------------------

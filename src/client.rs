@@ -7,7 +7,7 @@ use crate::models::RawResponse;
 const BASE_URL: &str = "https://api.x.com/2";
 const RATE_DELAY_MS: u64 = 350;
 
-pub const FIELDS: &str = "tweet.fields=created_at,public_metrics,author_id,conversation_id,entities,article,note_tweet&expansions=author_id&user.fields=username,name,public_metrics";
+pub const FIELDS: &str = "tweet.fields=created_at,public_metrics,author_id,conversation_id,entities,article,note_tweet&expansions=author_id&user.fields=username,name,public_metrics,connection_status,subscription_type";
 
 /// Shared HTTP client for X API calls.
 pub struct XClient {
@@ -239,8 +239,14 @@ impl XClient {
     }
 }
 
+const TIER_403_MSG: &str = "This endpoint requires pay-per-use or Enterprise access. Your current X API tier may not include this endpoint.";
+
 async fn handle_response(res: reqwest::Response) -> Result<RawResponse> {
     let status = res.status();
+
+    if status.as_u16() == 403 {
+        bail!("{TIER_403_MSG}");
+    }
 
     if status.as_u16() == 429 {
         let reset = res
@@ -295,6 +301,10 @@ async fn handle_json_response(
 
     if status.as_u16() == 401 {
         bail!("{unauthorized_message}");
+    }
+
+    if status.as_u16() == 403 {
+        bail!("{TIER_403_MSG}");
     }
 
     if status.as_u16() == 429 {

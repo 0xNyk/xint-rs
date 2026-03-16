@@ -253,7 +253,7 @@ impl MCPServer {
                     "type": "object",
                     "properties": {
                         "query": { "type": "string", "description": "Question or analysis request" },
-                        "model": { "type": "string", "description": "Grok model (grok-3-mini, grok-3)" },
+                        "model": { "type": "string", "description": "Grok model (grok-4-1-fast, grok-4, grok-3, grok-3-mini)" },
                     },
                     "required": ["query"]
                 }),
@@ -448,7 +448,7 @@ impl MCPServer {
                     "properties": {
                         "topic": { "type": "string", "description": "Report topic or query" },
                         "sentiment": { "type": "boolean", "description": "Include sentiment analysis (default: false)" },
-                        "model": { "type": "string", "description": "Grok model (default: grok-3-mini)" },
+                        "model": { "type": "string", "description": "Grok model (default: grok-4-1-fast)" },
                         "pages": { "type": "number", "description": "Search pages (default: 2)" },
                     },
                     "required": ["topic"]
@@ -1282,8 +1282,8 @@ impl MCPServer {
                     .and_then(|v| v.as_str())
                     .unwrap_or("grok-4");
                 let http = reqwest::Client::new();
-                let (results, summary) =
-                    xai::x_search(&http, &api_key, query, max_results, None, None, model, 45)
+                let (results, summary, _citations) =
+                    xai::x_search(&http, &api_key, query, max_results, None, None, model, 45, None, None, false)
                         .await
                         .map_err(|e| format!("x_search failed: {e}"))?;
 
@@ -1323,7 +1323,7 @@ impl MCPServer {
                 let model = args
                     .get("model")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("grok-3-mini")
+                    .unwrap_or("grok-4-1-fast")
                     .to_string();
                 let opts = crate::models::GrokOpts {
                     model: model.clone(),

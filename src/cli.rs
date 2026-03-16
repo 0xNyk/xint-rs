@@ -1,11 +1,33 @@
+use clap::builder::styling::{AnsiColor, Effects, Styles};
 use clap::{Parser, Subcommand, ValueEnum};
 
+fn cli_styles() -> Styles {
+    Styles::styled()
+        .header(AnsiColor::Yellow.on_default() | Effects::BOLD)
+        .usage(AnsiColor::Yellow.on_default() | Effects::BOLD)
+        .literal(AnsiColor::Green.on_default() | Effects::BOLD)
+        .placeholder(AnsiColor::Cyan.on_default())
+        .valid(AnsiColor::Green.on_default())
+        .invalid(AnsiColor::Red.on_default() | Effects::BOLD)
+        .error(AnsiColor::Red.on_default() | Effects::BOLD)
+}
+
 #[derive(Parser)]
-#[command(name = "xint", about = "X Intelligence CLI", version)]
+#[command(
+    name = "xint",
+    about = "X Intelligence CLI",
+    version,
+    styles = cli_styles(),
+    infer_subcommands = true
+)]
 pub struct Cli {
     /// Global policy mode for command allowlisting
     #[arg(long, global = true, value_enum, default_value_t = PolicyMode::ReadOnly)]
     pub policy: PolicyMode,
+
+    /// Color output control
+    #[arg(long, global = true, value_enum, default_value_t = ColorChoice::Auto)]
+    pub color: ColorChoice,
 
     /// Print tool description + input/output schema as JSON, then exit
     #[arg(long, global = true)]
@@ -33,6 +55,13 @@ pub enum PolicyMode {
     ReadOnly,
     Engagement,
     Moderation,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+pub enum ColorChoice {
+    Auto,
+    Always,
+    Never,
 }
 
 #[derive(Subcommand)]
@@ -69,6 +98,12 @@ pub enum Commands {
 
     /// Fetch a single tweet
     Tweet(TweetArgs),
+
+    /// Look up users who reposted a tweet
+    Reposts(RepostsArgs),
+
+    /// Search for users by keyword
+    Users(UsersArgs),
 
     /// Download media from a tweet
     Media(MediaArgs),
@@ -161,6 +196,9 @@ pub enum Commands {
     /// Start MCP server for AI agents (Claude, OpenAI)
     #[command(alias = "mcp-server")]
     Mcp(McpArgs),
+
+    /// Generate shell completions
+    Completions(CompletionsArgs),
 }
 
 // ---------------------------------------------------------------------------
@@ -168,6 +206,7 @@ pub enum Commands {
 // ---------------------------------------------------------------------------
 
 #[derive(Parser)]
+#[command(after_help = "Examples:\n  xint search \"bitcoin\" --sort likes --limit 10\n  xint search \"rust lang\" --since 1h --quality\n  xint search --from elonmusk --no-replies --limit 5")]
 pub struct SearchArgs {
     /// Search query
     pub query: Vec<String>,
@@ -254,6 +293,7 @@ pub struct SearchArgs {
 // ---------------------------------------------------------------------------
 
 #[derive(Parser)]
+#[command(after_help = "Examples:\n  xint watch \"bitcoin\" --interval 5m\n  xint watch \"rust lang\" --interval 1h --webhook https://example.com/hook\n  xint watch \"AI news\" --limit 20 --jsonl")]
 pub struct WatchArgs {
     /// Search query
     pub query: Vec<String>,
@@ -355,6 +395,7 @@ pub struct DiffArgs {
 // ---------------------------------------------------------------------------
 
 #[derive(Parser)]
+#[command(after_help = "Examples:\n  xint report \"AI trends\" --sentiment --save\n  xint report \"crypto\" --accounts elonmusk,sama --pages 3\n  xint report \"Rust ecosystem\" --model grok-3 --save")]
 pub struct ReportArgs {
     /// Report topic
     pub topic: Vec<String>,
@@ -368,7 +409,7 @@ pub struct ReportArgs {
     pub sentiment: bool,
 
     /// Grok model
-    #[arg(long, default_value = "grok-3-mini")]
+    #[arg(long, default_value = "grok-4-1-fast")]
     pub model: String,
 
     /// Search pages
@@ -395,6 +436,7 @@ pub struct ThreadArgs {
 }
 
 #[derive(Parser)]
+#[command(after_help = "Examples:\n  xint profile elonmusk --count 5\n  xint profile sama --count 20 --replies\n  xint profile rustlang --json")]
 pub struct ProfileArgs {
     /// Username
     pub username: String,
@@ -416,6 +458,34 @@ pub struct ProfileArgs {
 pub struct TweetArgs {
     /// Tweet ID
     pub tweet_id: String,
+
+    /// JSON output
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Parser)]
+pub struct RepostsArgs {
+    /// Tweet ID
+    pub tweet_id: String,
+
+    /// Max users to display
+    #[arg(long, default_value = "100")]
+    pub limit: usize,
+
+    /// JSON output
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Parser)]
+pub struct UsersArgs {
+    /// Search query
+    pub query: Vec<String>,
+
+    /// Max users to display
+    #[arg(long, default_value = "20")]
+    pub limit: usize,
 
     /// JSON output
     #[arg(long)]
@@ -674,12 +744,13 @@ pub struct TrendsArgs {
 // ---------------------------------------------------------------------------
 
 #[derive(Parser)]
+#[command(after_help = "Examples:\n  xint analyze \"What are the top AI trends this week?\"\n  xint analyze \"Summarize sentiment\" --tweets results.json\n  xint search bitcoin | xint analyze --pipe \"What is the overall sentiment?\"")]
 pub struct AnalyzeArgs {
     /// Query or question
     pub query: Vec<String>,
 
     /// Grok model
-    #[arg(long, default_value = "grok-3-mini")]
+    #[arg(long, default_value = "grok-4-1-fast")]
     pub model: String,
 
     /// Analyze tweets from JSON file
@@ -791,6 +862,14 @@ pub struct XSearchArgs {
     #[arg(long, default_value = "grok-4")]
     pub model: String,
 
+    /// Exclude results from these domains (comma-separated)
+    #[arg(long)]
+    pub exclude_domains: Option<String>,
+
+    /// Only include results from these domains (comma-separated)
+    #[arg(long)]
+    pub allow_domains: Option<String>,
+
     /// Max search results per query
     #[arg(long, default_value = "10")]
     pub max_results: u32,
@@ -806,6 +885,10 @@ pub struct XSearchArgs {
     /// To date filter (YYYY-MM-DD)
     #[arg(long)]
     pub to_date: Option<String>,
+
+    /// Enable image understanding in search results
+    #[arg(long)]
+    pub vision: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -820,6 +903,16 @@ pub struct CollectionsArgs {
     /// Top-K results for document search
     #[arg(long, default_value = "8")]
     pub top_k: u32,
+}
+
+// ---------------------------------------------------------------------------
+// Completions
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+pub struct CompletionsArgs {
+    /// Shell to generate completions for
+    pub shell: clap_complete::Shell,
 }
 
 // ---------------------------------------------------------------------------

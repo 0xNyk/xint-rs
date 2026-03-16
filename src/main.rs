@@ -16,18 +16,41 @@ mod output_meta;
 mod policy;
 mod reliability;
 mod sentiment;
+mod spinner;
+mod tui;
 mod webhook;
 
 use anyhow::Result;
 use clap::Parser;
 
-use cli::{Cli, Commands};
+use cli::{Cli, ColorChoice, Commands};
 use client::XClient;
 use config::Config;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    use std::io::IsTerminal;
+
     let cli = Cli::parse();
+
+    // Color detection chain: NO_COLOR env > --color flag > TERM=dumb > TTY
+    let color_enabled = if std::env::var("NO_COLOR").is_ok() {
+        false
+    } else {
+        match cli.color {
+            ColorChoice::Never => false,
+            ColorChoice::Always => true,
+            ColorChoice::Auto => {
+                if std::env::var("TERM").ok().as_deref() == Some("dumb") {
+                    false
+                } else {
+                    std::io::stdout().is_terminal()
+                }
+            }
+        }
+    };
+    colored::control::set_override(color_enabled);
+
     let config = Config::load()?;
     let client = XClient::new()?;
     let dry_run = cli.dry_run;
@@ -100,6 +123,8 @@ async fn main() -> Result<()> {
         Some(Commands::Thread(args)) => commands::thread::run(&args, &config, &client).await,
         Some(Commands::Profile(args)) => commands::profile::run(&args, &config, &client).await,
         Some(Commands::Tweet(args)) => commands::tweet::run(&args, &config, &client).await,
+        Some(Commands::Reposts(args)) => commands::reposts::run(&args, &config, &client).await,
+        Some(Commands::Users(args)) => commands::users::run(&args, &config, &client).await,
         Some(Commands::Media(args)) => commands::media::run(&args, &config, &client).await,
         Some(Commands::Article(args)) => commands::article::run(&args, &config).await,
         Some(Commands::Tui(args)) => commands::tui::run(&args, cli.policy).await,
@@ -146,6 +171,16 @@ async fn main() -> Result<()> {
         Some(Commands::XSearch(args)) => commands::x_search::run(&args, &config).await,
         Some(Commands::Collections(args)) => commands::collections::run(&args, &config).await,
         Some(Commands::Mcp(args)) => mcp::run(args, &config, cli.policy).await,
+        Some(Commands::Completions(args)) => {
+            use clap::CommandFactory;
+            clap_complete::generate(
+                args.shell,
+                &mut Cli::command(),
+                "xint",
+                &mut std::io::stdout(),
+            );
+            Ok(())
+        }
         None => {
             // Show help when no command provided
             use clap::CommandFactory;

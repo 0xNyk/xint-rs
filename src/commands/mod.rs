@@ -22,6 +22,8 @@ pub mod trends;
 pub mod tui;
 pub mod tui_adapter;
 pub mod tweet;
+pub mod reposts;
+pub mod users;
 pub mod watch;
 pub mod watchlist;
 pub mod x_search;

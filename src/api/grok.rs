@@ -8,10 +8,13 @@ const XAI_ENDPOINT: &str = "https://api.x.ai/v1/chat/completions";
 // Rough pricing per 1M tokens (USD)
 fn model_pricing(model: &str) -> (f64, f64) {
     match model {
+        "grok-4" => (3.00, 15.00),
+        "grok-4-1-fast" | "grok-4-1-fast-non-reasoning" => (0.20, 0.50),
+        "grok-4-1-fast-reasoning" => (0.20, 0.50),
         "grok-3" => (3.00, 15.00),
         "grok-3-mini" => (0.10, 0.40),
         "grok-2" => (2.00, 10.00),
-        _ => (0.10, 0.40),
+        _ => (0.20, 0.50),
     }
 }
 

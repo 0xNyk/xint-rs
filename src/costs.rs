@@ -27,13 +27,15 @@ pub fn cost_rate(operation: &str) -> (f64, f64) {
         "list_members_list" | "list_members_add" | "list_members_remove" => (0.0, 0.01),
         "blocks_list" | "blocks_add" | "blocks_remove" => (0.0, 0.01),
         "mutes_list" | "mutes_add" | "mutes_remove" => (0.0, 0.01),
+        "reposts" => (0.0, 0.01),
+        "users_search" => (0.0, 0.01),
         // xAI/Grok — rough estimates; actual cost tracked via track_cost_direct()
-        "grok_chat" => (0.0, 0.001),
-        "grok_analyze" => (0.0, 0.002),
+        "grok_chat" => (0.0, 0.0005),
+        "grok_analyze" => (0.0, 0.001),
         "grok_vision" => (0.0, 0.005),
         "grok_sentiment" => (0.0, 0.001),
-        "xai_article" => (0.0, 0.003),
-        "xai_x_search" => (0.0, 0.002),
+        "xai_article" => (0.0, 0.0015),
+        "xai_x_search" => (0.0, 0.001),
         _ => (0.005, 0.0),
     }
 }

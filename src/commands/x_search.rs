@@ -22,6 +22,14 @@ pub async fn run(args: &XSearchArgs, config: &Config) -> Result<()> {
     let timeout = args.timeout_seconds as u64;
     let from_date = args.from_date.as_deref();
     let to_date = args.to_date.as_deref();
+    let excluded_domains: Option<Vec<String>> = args
+        .exclude_domains
+        .as_ref()
+        .map(|s| s.split(',').map(|d| d.trim().to_string()).filter(|d| !d.is_empty()).collect());
+    let allowed_domains: Option<Vec<String>> = args
+        .allow_domains
+        .as_ref()
+        .map(|s| s.split(',').map(|d| d.trim().to_string()).filter(|d| !d.is_empty()).collect());
 
     let mut per_query: Vec<QueryResult> = Vec::new();
     let mut had_errors = false;
@@ -36,14 +44,18 @@ pub async fn run(args: &XSearchArgs, config: &Config) -> Result<()> {
             to_date,
             model,
             timeout,
+            excluded_domains.as_deref(),
+            allowed_domains.as_deref(),
+            args.vision,
         )
         .await
         {
-            Ok((results, summary)) => {
+            Ok((results, summary, citations)) => {
                 per_query.push(QueryResult {
                     query: q.clone(),
                     results,
                     summary,
+                    citations,
                     error: None,
                 });
             }
@@ -54,6 +66,7 @@ pub async fn run(args: &XSearchArgs, config: &Config) -> Result<()> {
                     query: q.clone(),
                     results: Vec::new(),
                     summary: String::new(),
+                    citations: Vec::new(),
                     error: Some(err_msg[..err_msg.len().min(500)].to_string()),
                 });
             }
@@ -102,13 +115,13 @@ pub async fn run(args: &XSearchArgs, config: &Config) -> Result<()> {
     } else {
         "OK"
     };
-    println!(
+    eprintln!(
         "xAI X search: {} ({} queries, {} results)",
         status,
         queries.len(),
         total_results
     );
-    println!("Report: {}", out_md.display());
+    eprintln!("Report: {}", out_md.display());
 
     // Emit memory candidates if requested
     if args.emit_candidates {
@@ -185,9 +198,9 @@ pub async fn run(args: &XSearchArgs, config: &Config) -> Result<()> {
                 writeln!(f, "{line}")?;
             }
         }
-        println!("New memory candidates: {}", new_lines.len());
+        eprintln!("New memory candidates: {}", new_lines.len());
         if !new_lines.is_empty() {
-            println!("Candidates appended: {}", cand_out.display());
+            eprintln!("Candidates appended: {}", cand_out.display());
         }
     }
 
@@ -198,6 +211,7 @@ struct QueryResult {
     query: String,
     results: Vec<xai::XSearchResult>,
     summary: String,
+    citations: Vec<xai::Citation>,
     error: Option<String>,
 }
 
@@ -244,6 +258,7 @@ fn build_json_payload(
                         "created_at": r.best_created_at(),
                     })
                 }).collect::<Vec<_>>(),
+                "citations": qr.citations,
                 "error": qr.error,
             })
         })
@@ -317,6 +332,19 @@ fn render_md(ts: &str, queries: &[String], per_query: &[QueryResult], summary: &
                 lines.push(format!("- {prefix}{text}{meta} {url}"));
             }
         }
+
+        if !qr.citations.is_empty() {
+            lines.push(String::new());
+            lines.push("**Citations:**".to_string());
+            for c in &qr.citations {
+                let url = c.url.as_deref().unwrap_or("");
+                let title = c.title.as_deref().unwrap_or(url);
+                if !url.is_empty() {
+                    lines.push(format!("- [{title}]({url})"));
+                }
+            }
+        }
+
         lines.push(String::new());
     }
 

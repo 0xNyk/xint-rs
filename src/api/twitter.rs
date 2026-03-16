@@ -384,7 +384,7 @@ pub async fn get_profile(
     include_replies: bool,
 ) -> Result<(serde_json::Value, Vec<Tweet>)> {
     let path =
-        format!("users/by/username/{username}?user.fields=public_metrics,description,created_at");
+        format!("users/by/username/{username}?user.fields=public_metrics,description,created_at,connection_status,subscription_type");
     let raw = client.bearer_get(&path, token).await?;
 
     let user = match &raw.data {
@@ -400,6 +400,47 @@ pub async fn get_profile(
 
     let tweets = tweets.into_iter().take(count as usize).collect();
     Ok((user, tweets))
+}
+
+/// Get users who reposted a tweet.
+pub async fn get_reposts(
+    client: &XClient,
+    token: &str,
+    tweet_id: &str,
+    max_results: u32,
+) -> Result<Vec<serde_json::Value>> {
+    let per_page = max_results.min(100);
+    let path = format!(
+        "tweets/{tweet_id}/retweeted_by?user.fields=id,username,name,public_metrics,description&max_results={per_page}"
+    );
+    let raw = client.bearer_get(&path, token).await?;
+    Ok(raw
+        .data
+        .as_ref()
+        .and_then(|d| d.as_array())
+        .cloned()
+        .unwrap_or_default())
+}
+
+/// Search for users by keyword.
+pub async fn search_users(
+    client: &XClient,
+    token: &str,
+    query: &str,
+    max_results: u32,
+) -> Result<Vec<serde_json::Value>> {
+    let per_page = max_results.min(100);
+    let encoded = urlencoding::encode(query);
+    let path = format!(
+        "users/search?query={encoded}&max_results={per_page}&user.fields=id,username,name,public_metrics,description,created_at"
+    );
+    let raw = client.bearer_get(&path, token).await?;
+    Ok(raw
+        .data
+        .as_ref()
+        .and_then(|d| d.as_array())
+        .cloned()
+        .unwrap_or_default())
 }
 
 /// Sort tweets by engagement metric.

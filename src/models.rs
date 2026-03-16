@@ -87,6 +87,8 @@ pub struct RawUser {
     pub public_metrics: Option<UserPublicMetrics>,
     pub description: Option<String>,
     pub created_at: Option<String>,
+    pub connection_status: Option<Vec<String>>,
+    pub subscription_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -303,7 +305,7 @@ pub struct GrokOpts {
 impl Default for GrokOpts {
     fn default() -> Self {
         Self {
-            model: "grok-3-mini".to_string(),
+            model: "grok-4-1-fast".to_string(),
             temperature: 0.7,
             max_tokens: 1024,
         }

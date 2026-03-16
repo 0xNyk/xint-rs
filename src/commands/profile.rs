@@ -13,10 +13,13 @@ pub async fn run(args: &ProfileArgs, config: &Config, client: &XClient) -> Resul
     let token = config.require_bearer_token()?;
     let username = args.username.trim_start_matches('@');
 
-    eprintln!("Fetching profile for @{username}...");
-
-    let (user, tweets) =
-        twitter::get_profile(client, token, username, args.count, args.replies).await?;
+    let spinner = crate::spinner::Spinner::new(&format!("Fetching profile for @{username}..."));
+    let result = twitter::get_profile(client, token, username, args.count, args.replies).await;
+    match &result {
+        Ok((_, tweets)) => spinner.done(&format!("@{username}: {} tweets", tweets.len())),
+        Err(_) => spinner.fail(&format!("Failed to fetch @{username}")),
+    }
+    let (user, tweets) = result?;
 
     costs::track_cost(
         &config.costs_path(),

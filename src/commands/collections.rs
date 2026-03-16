@@ -142,7 +142,7 @@ async fn cmd_sync_dir(
     let ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
 
     // 1) Ensure collection
-    println!("Ensuring collection '{collection_name}'...");
+    eprintln!("Ensuring collection '{collection_name}'...");
     let ensure_res =
         xai::collections_ensure(http, mgmt_key, &collection_name, "xint KB sync").await?;
 
@@ -187,7 +187,7 @@ async fn cmd_sync_dir(
     paths.sort();
     paths.truncate(limit);
 
-    println!("Found {} files matching globs", paths.len());
+    eprintln!("Found {} files matching globs", paths.len());
 
     // 3) Upload + attach
     let mut uploaded = 0;
@@ -196,7 +196,7 @@ async fn cmd_sync_dir(
 
     for p in &paths {
         let fname = p.file_name().and_then(|n| n.to_str()).unwrap_or("?");
-        print!("  Uploading {fname}... ");
+        eprint!("  Uploading {fname}... ");
 
         match xai::files_upload(http, api_key, p, &purpose).await {
             Ok(up_res) => {
@@ -209,19 +209,19 @@ async fn cmd_sync_dir(
                     {
                         Ok(_) => {
                             attached += 1;
-                            println!("uploaded + attached");
+                            eprintln!("uploaded + attached");
                         }
                         Err(e) => {
-                            println!("uploaded (attach failed: {e})");
+                            eprintln!("uploaded (attach failed: {e})");
                             failures.push(format!("{fname}: attach error: {e}"));
                         }
                     }
                 } else {
-                    println!("uploaded (no collection_id or doc_id to attach)");
+                    eprintln!("uploaded (no collection_id or doc_id to attach)");
                 }
             }
             Err(e) => {
-                println!("FAILED: {e}");
+                eprintln!("FAILED: {e}");
                 failures.push(format!("{fname}: {e}"));
             }
         }
@@ -262,13 +262,13 @@ async fn cmd_sync_dir(
     }
     std::fs::write(&report_path, lines.join("\n").trim_end().to_owned() + "\n")?;
 
-    println!(
+    eprintln!(
         "\nSync complete: {} uploaded, {} attached, {} failures",
         uploaded,
         attached,
         failures.len()
     );
-    println!("Report: {}", report_path.display());
+    eprintln!("Report: {}", report_path.display());
 
     Ok(())
 }
