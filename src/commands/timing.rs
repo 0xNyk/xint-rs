@@ -286,8 +286,6 @@ fn format_timing(analysis: &TimingAnalysis, username: &str, since: &str) -> Stri
             let block = blocks[level.min(8)];
             if level >= 6 {
                 out.push_str(&format!("{}", format!(" {} ", block).on_green()));
-            } else if level >= 3 {
-                out.push_str(&format!(" {} ", block));
             } else {
                 out.push_str(&format!(" {} ", block));
             }

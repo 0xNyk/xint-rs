@@ -85,7 +85,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
 }
 
 fn render_tabs(app: &App, frame: &mut Frame, area: Rect) {
-    let tabs_data = vec![
+    let tabs_data = [
         DashboardTab::Commands,
         DashboardTab::Output,
         DashboardTab::Help,
