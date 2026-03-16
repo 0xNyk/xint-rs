@@ -439,3 +439,63 @@ pub struct WatchlistAccount {
 pub struct Watchlist {
     pub accounts: Vec<WatchlistAccount>,
 }
+
+// ---------------------------------------------------------------------------
+// Bookmark Knowledge Base
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceLink {
+    pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub domain: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BookmarkExtraction {
+    pub tweet_id: String,
+    pub tweet_url: String,
+    pub author: String,
+    pub text_preview: String,
+    pub topics: Vec<String>,
+    pub entities: Vec<String>,
+    pub summary: String,
+    #[serde(default)]
+    pub evaluation: String,
+    pub sentiment: String,
+    pub importance: u8,
+    pub key_insights: Vec<String>,
+    #[serde(default)]
+    pub source_links: Vec<SourceLink>,
+    pub urls: Vec<String>,
+    pub extracted_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BookmarkKnowledgeBase {
+    pub version: u8,
+    pub last_extracted: String,
+    pub total_bookmarks_processed: usize,
+    pub extractions: Vec<BookmarkExtraction>,
+    pub topic_index: HashMap<String, Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub collection_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_synced: Option<String>,
+}
+
+impl Default for BookmarkKnowledgeBase {
+    fn default() -> Self {
+        Self {
+            version: 1,
+            last_extracted: String::new(),
+            total_bookmarks_processed: 0,
+            extractions: Vec::new(),
+            topic_index: HashMap::new(),
+            collection_id: None,
+            last_synced: None,
+        }
+    }
+}

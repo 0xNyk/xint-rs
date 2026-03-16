@@ -175,6 +175,7 @@ async fn main() -> Result<()> {
         Some(Commands::Growth(args)) => commands::growth::run(&args, &config).await,
         Some(Commands::Timing(args)) => commands::timing::run(&args, &config, &client).await,
         Some(Commands::ContentAudit(args)) => commands::content_audit::run(&args, &config, &client).await,
+        Some(Commands::BookmarkKb(args)) => commands::bookmark_kb::run(&args, &config, &client).await,
         Some(Commands::Mcp(args)) => mcp::run(args, &config, cli.policy).await,
         Some(Commands::Completions(args)) => {
             use clap::CommandFactory;
