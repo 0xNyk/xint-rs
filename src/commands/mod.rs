@@ -3,6 +3,7 @@ pub mod analyze;
 pub mod analytics;
 pub mod article;
 pub mod auth_cmd;
+pub mod bookmark_kb;
 pub mod bookmarks;
 pub mod cache_cmd;
 pub mod capabilities;

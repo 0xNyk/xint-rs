@@ -214,6 +214,10 @@ pub enum Commands {
     #[command(alias = "audit")]
     ContentAudit(ContentAuditArgs),
 
+    /// Extract and search knowledge from bookmarks (OAuth required)
+    #[command(alias = "bkb")]
+    BookmarkKb(BookmarkKbArgs),
+
     /// Generate shell completions
     Completions(CompletionsArgs),
 }
@@ -960,6 +964,57 @@ pub struct ContentAuditArgs {
     /// Grok model to use
     #[arg(long, default_value = "grok-4-1-fast")]
     pub model: String,
+}
+
+// ---------------------------------------------------------------------------
+// Bookmark Knowledge Base
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+#[command(after_help = "Examples:\n  xint bookmark-kb extract --limit 50\n  xint bookmark-kb search \"AI agents\"\n  xint bookmark-kb topics\n  xint bookmark-kb sync")]
+pub struct BookmarkKbArgs {
+    /// Subcommand: extract, search, sync, topics, status
+    pub subcommand: Option<Vec<String>>,
+
+    /// Max bookmarks to process for extract
+    #[arg(long, default_value = "100")]
+    pub limit: usize,
+
+    /// Only bookmarks from this time window (e.g. 7d, 30d)
+    #[arg(long)]
+    pub since: Option<String>,
+
+    /// Batch size for Grok extraction
+    #[arg(long, default_value = "20")]
+    pub batch_size: usize,
+
+    /// Grok model to use
+    #[arg(long, default_value = "grok-4-1-fast")]
+    pub model: String,
+
+    /// Re-extract already-processed tweets
+    #[arg(long)]
+    pub force: bool,
+
+    /// JSON output
+    #[arg(long)]
+    pub json: bool,
+
+    /// Filter by topic (for search)
+    #[arg(long)]
+    pub topic: Option<String>,
+
+    /// Minimum importance (1-5, for search)
+    #[arg(long)]
+    pub min_importance: Option<u8>,
+
+    /// Search via xAI Collections instead of local
+    #[arg(long)]
+    pub remote: bool,
+
+    /// Collection name for sync
+    #[arg(long, default_value = "xint-bookmarks")]
+    pub collection_name: String,
 }
 
 // ---------------------------------------------------------------------------

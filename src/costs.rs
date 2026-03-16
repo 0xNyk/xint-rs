@@ -39,6 +39,7 @@ pub fn cost_rate(operation: &str) -> (f64, f64) {
         "timeline" => (0.005, 0.0),
         "analytics" => (0.0, 0.01),
         "content_audit" => (0.0, 0.001),
+        "bookmark_kb_extract" => (0.0, 0.001),
         _ => (0.005, 0.0),
     }
 }

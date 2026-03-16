@@ -60,6 +60,7 @@ pub fn command_name(cmd: &Commands) -> &'static str {
         Commands::Growth(_) => "growth",
         Commands::Timing(_) => "timing",
         Commands::ContentAudit(_) => "content-audit",
+        Commands::BookmarkKb(_) => "bookmark-kb",
         Commands::Completions(_) => "completions",
     }
 }
@@ -77,7 +78,8 @@ pub fn required_mode(cmd: &Commands) -> PolicyMode {
         | Commands::Follow(_)
         | Commands::Unfollow(_)
         | Commands::Lists(_)
-        | Commands::Diff(_) => PolicyMode::Engagement,
+        | Commands::Diff(_)
+        | Commands::BookmarkKb(_) => PolicyMode::Engagement,
         _ => PolicyMode::ReadOnly,
     }
 }
