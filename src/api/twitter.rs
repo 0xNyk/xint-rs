@@ -224,16 +224,31 @@ pub fn parse_tweets(raw: &RawResponse) -> Vec<Tweet> {
             });
 
             let organic_metrics = t.get("organic_metrics").map(|om| OrganicMetrics {
-                impression_count: om.get("impression_count").and_then(|v| v.as_u64()).unwrap_or(0),
+                impression_count: om
+                    .get("impression_count")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0),
                 like_count: om.get("like_count").and_then(|v| v.as_u64()).unwrap_or(0),
                 reply_count: om.get("reply_count").and_then(|v| v.as_u64()).unwrap_or(0),
-                retweet_count: om.get("retweet_count").and_then(|v| v.as_u64()).unwrap_or(0),
+                retweet_count: om
+                    .get("retweet_count")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0),
             });
 
             let non_public_metrics = t.get("non_public_metrics").map(|npm| NonPublicMetrics {
-                impression_count: npm.get("impression_count").and_then(|v| v.as_u64()).unwrap_or(0),
-                url_link_clicks: npm.get("url_link_clicks").and_then(|v| v.as_u64()).unwrap_or(0),
-                user_profile_clicks: npm.get("user_profile_clicks").and_then(|v| v.as_u64()).unwrap_or(0),
+                impression_count: npm
+                    .get("impression_count")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0),
+                url_link_clicks: npm
+                    .get("url_link_clicks")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0),
+                user_profile_clicks: npm
+                    .get("user_profile_clicks")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0),
             });
 
             Some(Tweet {

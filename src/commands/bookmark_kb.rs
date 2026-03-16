@@ -160,12 +160,25 @@ async fn run_extract(args: &BookmarkKbArgs, config: &Config, client: &XClient) -
         let tweet_context: String = batch
             .iter()
             .map(|t| {
-                let links: String = t.urls.iter().map(|u| {
-                    let expanded = u.unwound_url.as_deref().unwrap_or(&u.url);
-                    let title = u.title.as_deref().map(|t| format!(" ({t})")).unwrap_or_default();
-                    format!("  - {expanded}{title}")
-                }).collect::<Vec<_>>().join("\n");
-                let links_section = if links.is_empty() { String::new() } else { format!("\nLinks:\n{links}") };
+                let links: String = t
+                    .urls
+                    .iter()
+                    .map(|u| {
+                        let expanded = u.unwound_url.as_deref().unwrap_or(&u.url);
+                        let title = u
+                            .title
+                            .as_deref()
+                            .map(|t| format!(" ({t})"))
+                            .unwrap_or_default();
+                        format!("  - {expanded}{title}")
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let links_section = if links.is_empty() {
+                    String::new()
+                } else {
+                    format!("\nLinks:\n{links}")
+                };
                 format!(
                     "Tweet {} by @{} ({}):\n{}{}\n---",
                     t.id, t.username, t.tweet_url, t.text, links_section
@@ -211,14 +224,9 @@ async fn run_extract(args: &BookmarkKbArgs, config: &Config, client: &XClient) -
             max_tokens: 2048,
         };
 
-        let response = grok::grok_chat_tracked(
-            &http,
-            api_key,
-            &messages,
-            &opts,
-            Some(&config.costs_path()),
-        )
-        .await?;
+        let response =
+            grok::grok_chat_tracked(&http, api_key, &messages, &opts, Some(&config.costs_path()))
+                .await?;
 
         let content = response.content.trim();
         let json_str = if content.starts_with("```") {
@@ -270,46 +278,58 @@ async fn run_extract(args: &BookmarkKbArgs, config: &Config, client: &XClient) -
                             .and_then(|v| v.as_str())
                             .unwrap_or("neutral")
                             .to_string(),
-                        importance: item
-                            .get("importance")
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(3) as u8,
+                        importance: item.get("importance").and_then(|v| v.as_u64()).unwrap_or(3)
+                            as u8,
                         key_insights: item
                             .get("key_insights")
                             .and_then(|v| serde_json::from_value(v.clone()).ok())
                             .unwrap_or_default(),
                         source_links: tweet
                             .map(|t| {
-                                t.urls.iter().map(|u| {
-                                    let expanded = u.unwound_url.as_deref().unwrap_or(&u.url).to_string();
-                                    let domain = expanded.replace("https://", "").replace("http://", "").split('/').next().unwrap_or("").to_string();
-                                    SourceLink {
-                                        url: expanded,
-                                        title: u.title.clone(),
-                                        domain: if domain.is_empty() { None } else { Some(domain) },
-                                    }
-                                }).collect()
+                                t.urls
+                                    .iter()
+                                    .map(|u| {
+                                        let expanded =
+                                            u.unwound_url.as_deref().unwrap_or(&u.url).to_string();
+                                        let domain = expanded
+                                            .replace("https://", "")
+                                            .replace("http://", "")
+                                            .split('/')
+                                            .next()
+                                            .unwrap_or("")
+                                            .to_string();
+                                        SourceLink {
+                                            url: expanded,
+                                            title: u.title.clone(),
+                                            domain: if domain.is_empty() {
+                                                None
+                                            } else {
+                                                Some(domain)
+                                            },
+                                        }
+                                    })
+                                    .collect()
                             })
                             .unwrap_or_default(),
                         urls: tweet
-                            .map(|t| t.urls.iter().map(|u| u.unwound_url.as_deref().unwrap_or(&u.url).to_string()).collect())
+                            .map(|t| {
+                                t.urls
+                                    .iter()
+                                    .map(|u| u.unwound_url.as_deref().unwrap_or(&u.url).to_string())
+                                    .collect()
+                            })
                             .unwrap_or_default(),
                         extracted_at: chrono::Utc::now().to_rfc3339(),
                     };
 
                     if args.force {
-                        kb.extractions
-                            .retain(|e| e.tweet_id != extraction.tweet_id);
+                        kb.extractions.retain(|e| e.tweet_id != extraction.tweet_id);
                     }
                     kb.extractions.push(extraction);
                 }
             }
             Err(e) => {
-                eprintln!(
-                    "  Warning: Failed to parse batch {} response: {}",
-                    i + 1,
-                    e
-                );
+                eprintln!("  Warning: Failed to parse batch {} response: {}", i + 1, e);
                 eprintln!(
                     "  Raw response: {}...",
                     &json_str[..json_str.len().min(200)]
@@ -354,11 +374,7 @@ async fn run_extract(args: &BookmarkKbArgs, config: &Config, client: &XClient) -
     Ok(())
 }
 
-async fn run_search(
-    args: &BookmarkKbArgs,
-    query_parts: &[String],
-    config: &Config,
-) -> Result<()> {
+async fn run_search(args: &BookmarkKbArgs, query_parts: &[String], config: &Config) -> Result<()> {
     let query = query_parts.join(" ");
     if query.is_empty() {
         bail!("Search query required. Usage: xint bookmark-kb search \"your query\"");
@@ -468,9 +484,7 @@ async fn run_search(
     if args.json {
         let json_results: Vec<_> = results
             .iter()
-            .map(|(score, ext)| {
-                serde_json::json!({ "score": score, "extraction": ext })
-            })
+            .map(|(score, ext)| serde_json::json!({ "score": score, "extraction": ext }))
             .collect();
         println!("{}", serde_json::to_string_pretty(&json_results)?);
     } else {
@@ -531,10 +545,7 @@ async fn run_sync(args: &BookmarkKbArgs, config: &Config) -> Result<()> {
     let mut topic_groups: HashMap<String, Vec<&BookmarkExtraction>> = HashMap::new();
     for ext in &kb.extractions {
         for topic in &ext.topics {
-            topic_groups
-                .entry(topic.clone())
-                .or_default()
-                .push(ext);
+            topic_groups.entry(topic.clone()).or_default().push(ext);
         }
     }
 
@@ -598,9 +609,8 @@ async fn run_sync(args: &BookmarkKbArgs, config: &Config) -> Result<()> {
         let collections = list_data.get("data").and_then(|v| v.as_array());
 
         let collection_id = if let Some(existing) = collections.and_then(|arr| {
-            arr.iter().find(|c| {
-                c.get("name").and_then(|v| v.as_str()) == Some(&args.collection_name)
-            })
+            arr.iter()
+                .find(|c| c.get("name").and_then(|v| v.as_str()) == Some(&args.collection_name))
         }) {
             let id = existing
                 .get("id")
@@ -695,7 +705,10 @@ async fn run_sync(args: &BookmarkKbArgs, config: &Config) -> Result<()> {
         kb.last_synced = Some(chrono::Utc::now().to_rfc3339());
         save_kb(config, &kb)?;
 
-        println!("Uploaded {uploaded}/{} topics to collection (attached: {attached})", topic_groups.len());
+        println!(
+            "Uploaded {uploaded}/{} topics to collection (attached: {attached})",
+            topic_groups.len()
+        );
     }
 
     Ok(())

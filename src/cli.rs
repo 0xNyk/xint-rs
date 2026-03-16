@@ -227,7 +227,9 @@ pub enum Commands {
 // ---------------------------------------------------------------------------
 
 #[derive(Parser)]
-#[command(after_help = "Examples:\n  xint search \"bitcoin\" --sort likes --limit 10\n  xint search \"rust lang\" --since 1h --quality\n  xint search --from elonmusk --no-replies --limit 5")]
+#[command(
+    after_help = "Examples:\n  xint search \"bitcoin\" --sort likes --limit 10\n  xint search \"rust lang\" --since 1h --quality\n  xint search --from elonmusk --no-replies --limit 5"
+)]
 pub struct SearchArgs {
     /// Search query
     pub query: Vec<String>,
@@ -314,7 +316,9 @@ pub struct SearchArgs {
 // ---------------------------------------------------------------------------
 
 #[derive(Parser)]
-#[command(after_help = "Examples:\n  xint watch \"bitcoin\" --interval 5m\n  xint watch \"rust lang\" --interval 1h --webhook https://example.com/hook\n  xint watch \"AI news\" --limit 20 --jsonl")]
+#[command(
+    after_help = "Examples:\n  xint watch \"bitcoin\" --interval 5m\n  xint watch \"rust lang\" --interval 1h --webhook https://example.com/hook\n  xint watch \"AI news\" --limit 20 --jsonl"
+)]
 pub struct WatchArgs {
     /// Search query
     pub query: Vec<String>,
@@ -416,7 +420,9 @@ pub struct DiffArgs {
 // ---------------------------------------------------------------------------
 
 #[derive(Parser)]
-#[command(after_help = "Examples:\n  xint report \"AI trends\" --sentiment --save\n  xint report \"crypto\" --accounts elonmusk,sama --pages 3\n  xint report \"Rust ecosystem\" --model grok-3 --save")]
+#[command(
+    after_help = "Examples:\n  xint report \"AI trends\" --sentiment --save\n  xint report \"crypto\" --accounts elonmusk,sama --pages 3\n  xint report \"Rust ecosystem\" --model grok-3 --save"
+)]
 pub struct ReportArgs {
     /// Report topic
     pub topic: Vec<String>,
@@ -457,7 +463,9 @@ pub struct ThreadArgs {
 }
 
 #[derive(Parser)]
-#[command(after_help = "Examples:\n  xint profile elonmusk --count 5\n  xint profile sama --count 20 --replies\n  xint profile rustlang --json")]
+#[command(
+    after_help = "Examples:\n  xint profile elonmusk --count 5\n  xint profile sama --count 20 --replies\n  xint profile rustlang --json"
+)]
 pub struct ProfileArgs {
     /// Username
     pub username: String,
@@ -765,7 +773,9 @@ pub struct TrendsArgs {
 // ---------------------------------------------------------------------------
 
 #[derive(Parser)]
-#[command(after_help = "Examples:\n  xint analyze \"What are the top AI trends this week?\"\n  xint analyze \"Summarize sentiment\" --tweets results.json\n  xint search bitcoin | xint analyze --pipe \"What is the overall sentiment?\"")]
+#[command(
+    after_help = "Examples:\n  xint analyze \"What are the top AI trends this week?\"\n  xint analyze \"Summarize sentiment\" --tweets results.json\n  xint search bitcoin | xint analyze --pipe \"What is the overall sentiment?\""
+)]
 pub struct AnalyzeArgs {
     /// Query or question
     pub query: Vec<String>,
@@ -931,7 +941,9 @@ pub struct CollectionsArgs {
 // ---------------------------------------------------------------------------
 
 #[derive(Parser)]
-#[command(after_help = "Examples:\n  xint analytics --since 7d\n  xint analytics --since 30d --json\n  xint analytics --save")]
+#[command(
+    after_help = "Examples:\n  xint analytics --since 7d\n  xint analytics --since 30d --json\n  xint analytics --save"
+)]
 pub struct AnalyticsArgs {
     /// Time window (e.g. 7d, 30d, 24h)
     #[arg(long, default_value = "7d")]
@@ -951,7 +963,9 @@ pub struct AnalyticsArgs {
 // ---------------------------------------------------------------------------
 
 #[derive(Parser)]
-#[command(after_help = "Examples:\n  xint content-audit --since 30d\n  xint audit --save\n  xint audit --model grok-4")]
+#[command(
+    after_help = "Examples:\n  xint content-audit --since 30d\n  xint audit --save\n  xint audit --model grok-4"
+)]
 pub struct ContentAuditArgs {
     /// Time window (e.g. 7d, 30d)
     #[arg(long, default_value = "30d")]
@@ -971,7 +985,9 @@ pub struct ContentAuditArgs {
 // ---------------------------------------------------------------------------
 
 #[derive(Parser)]
-#[command(after_help = "Examples:\n  xint bookmark-kb extract --limit 50\n  xint bookmark-kb search \"AI agents\"\n  xint bookmark-kb topics\n  xint bookmark-kb sync")]
+#[command(
+    after_help = "Examples:\n  xint bookmark-kb extract --limit 50\n  xint bookmark-kb search \"AI agents\"\n  xint bookmark-kb topics\n  xint bookmark-kb sync"
+)]
 pub struct BookmarkKbArgs {
     /// Subcommand: extract, search, sync, topics, status
     pub subcommand: Option<Vec<String>>,
@@ -1022,7 +1038,9 @@ pub struct BookmarkKbArgs {
 // ---------------------------------------------------------------------------
 
 #[derive(Parser)]
-#[command(after_help = "Examples:\n  xint growth --history\n  xint growth --velocity\n  xint growth --json")]
+#[command(
+    after_help = "Examples:\n  xint growth --history\n  xint growth --velocity\n  xint growth --json"
+)]
 pub struct GrowthArgs {
     /// Show snapshot history
     #[arg(long)]
@@ -1058,7 +1076,9 @@ pub struct TimingArgs {
 // ---------------------------------------------------------------------------
 
 #[derive(Parser)]
-#[command(after_help = "Examples:\n  xint top --since 7d --by likes --limit 10\n  xint top --since 30d --type thread\n  xint top --json")]
+#[command(
+    after_help = "Examples:\n  xint top --since 7d --by likes --limit 10\n  xint top --since 30d --type thread\n  xint top --json"
+)]
 pub struct TopArgs {
     /// Sort metric: engagement_rate, likes, impressions, retweets
     #[arg(long, default_value = "engagement_rate")]

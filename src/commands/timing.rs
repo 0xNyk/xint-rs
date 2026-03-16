@@ -47,7 +47,10 @@ pub async fn run(args: &TimingArgs, config: &Config, client: &XClient) -> Result
     if args.json {
         format::print_json_pretty_filtered(&analysis)?;
     } else {
-        println!("{}", format_timing(&analysis, &tokens.username, &args.since));
+        println!(
+            "{}",
+            format_timing(&analysis, &tokens.username, &args.since)
+        );
     }
 
     Ok(())
@@ -125,7 +128,11 @@ fn analyze_timing(tweets: &[Tweet]) -> TimingAnalysis {
                 0.0
             };
             let avg_likes = if n > 0 {
-                tweets_at.iter().map(|t| t.metrics.likes as f64).sum::<f64>() / n as f64
+                tweets_at
+                    .iter()
+                    .map(|t| t.metrics.likes as f64)
+                    .sum::<f64>()
+                    / n as f64
             } else {
                 0.0
             };
@@ -164,8 +171,8 @@ fn analyze_timing(tweets: &[Tweet]) -> TimingAnalysis {
                     let tweets_at = by_day_hour.get(&(d, h));
                     match tweets_at {
                         Some(v) if !v.is_empty() => {
-                            let er: f64 = v.iter().map(|t| engagement_rate(t)).sum::<f64>()
-                                / v.len() as f64;
+                            let er: f64 =
+                                v.iter().map(|t| engagement_rate(t)).sum::<f64>() / v.len() as f64;
                             (er * 100.0).round() / 100.0
                         }
                         _ => 0.0,
@@ -211,7 +218,10 @@ fn analyze_timing(tweets: &[Tweet]) -> TimingAnalysis {
 
 fn format_timing(analysis: &TimingAnalysis, username: &str, since: &str) -> String {
     let days_of_week = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-    let blocks = [' ', '\u{2581}', '\u{2582}', '\u{2583}', '\u{2584}', '\u{2585}', '\u{2586}', '\u{2587}', '\u{2588}'];
+    let blocks = [
+        ' ', '\u{2581}', '\u{2582}', '\u{2583}', '\u{2584}', '\u{2585}', '\u{2586}', '\u{2587}',
+        '\u{2588}',
+    ];
 
     let mut out = String::new();
 
@@ -225,7 +235,10 @@ fn format_timing(analysis: &TimingAnalysis, username: &str, since: &str) -> Stri
 
     // Best windows
     if !analysis.best_windows.is_empty() {
-        out.push_str(&format!("  {}\n", "Best Posting Windows".bold().underline()));
+        out.push_str(&format!(
+            "  {}\n",
+            "Best Posting Windows".bold().underline()
+        ));
         for (i, w) in analysis.best_windows.iter().enumerate() {
             out.push_str(&format!(
                 "  {}. {} {:02}:00 UTC  {}% ER  ({} tweets)\n",
@@ -240,7 +253,10 @@ fn format_timing(analysis: &TimingAnalysis, username: &str, since: &str) -> Stri
     }
 
     // Heatmap
-    out.push_str(&format!("  {}\n", "Engagement Heatmap (UTC)".bold().underline()));
+    out.push_str(&format!(
+        "  {}\n",
+        "Engagement Heatmap (UTC)".bold().underline()
+    ));
     out.push_str("        ");
     for h in 0..24 {
         if h % 3 == 0 {
@@ -289,7 +305,10 @@ fn format_timing(analysis: &TimingAnalysis, username: &str, since: &str) -> Stri
         if h.tweets > 0 {
             out.push_str(&format!(
                 "  {:>02}:00 {:>6} {:>7}% {:>10.1}\n",
-                h.hour, h.tweets, format!("{:.2}", h.avg_engagement_rate), h.avg_likes
+                h.hour,
+                h.tweets,
+                format!("{:.2}", h.avg_engagement_rate),
+                h.avg_likes
             ));
         }
     }

@@ -150,8 +150,7 @@ fn engagement_rate(t: &Tweet) -> f64 {
     if t.metrics.impressions == 0 {
         return 0.0;
     }
-    let engagements =
-        t.metrics.likes + t.metrics.retweets + t.metrics.replies + t.metrics.quotes;
+    let engagements = t.metrics.likes + t.metrics.retweets + t.metrics.replies + t.metrics.quotes;
     engagements as f64 / t.metrics.impressions as f64 * 100.0
 }
 

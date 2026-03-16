@@ -30,7 +30,15 @@ pub async fn run(args: &AnalyzeArgs, config: &Config) -> Result<()> {
         } else {
             Some(args.query.join(" "))
         };
-        grok::analyze_tweets_tracked(&http, api_key, &tweets, prompt.as_deref(), &opts, Some(&config.costs_path())).await?
+        grok::analyze_tweets_tracked(
+            &http,
+            api_key,
+            &tweets,
+            prompt.as_deref(),
+            &opts,
+            Some(&config.costs_path()),
+        )
+        .await?
     } else if let Some(ref tweet_file) = args.tweets {
         let raw = fs::read_to_string(tweet_file)?;
         let tweets = parse_tweets_input(&raw)?;
@@ -39,7 +47,15 @@ pub async fn run(args: &AnalyzeArgs, config: &Config) -> Result<()> {
         } else {
             Some(args.query.join(" "))
         };
-        grok::analyze_tweets_tracked(&http, api_key, &tweets, prompt.as_deref(), &opts, Some(&config.costs_path())).await?
+        grok::analyze_tweets_tracked(
+            &http,
+            api_key,
+            &tweets,
+            prompt.as_deref(),
+            &opts,
+            Some(&config.costs_path()),
+        )
+        .await?
     } else if !args.query.is_empty() {
         let query = args.query.join(" ");
         let messages = vec![
@@ -53,7 +69,8 @@ pub async fn run(args: &AnalyzeArgs, config: &Config) -> Result<()> {
                 content: query,
             },
         ];
-        grok::grok_chat_tracked(&http, api_key, &messages, &opts, Some(&config.costs_path())).await?
+        grok::grok_chat_tracked(&http, api_key, &messages, &opts, Some(&config.costs_path()))
+            .await?
     } else {
         println!("Usage: xint analyze <query>");
         println!("       xint analyze --tweets <file>");

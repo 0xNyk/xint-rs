@@ -1282,10 +1282,21 @@ impl MCPServer {
                     .and_then(|v| v.as_str())
                     .unwrap_or("grok-4");
                 let http = reqwest::Client::new();
-                let (results, summary, _citations) =
-                    xai::x_search(&http, &api_key, query, max_results, None, None, model, 45, None, None, false)
-                        .await
-                        .map_err(|e| format!("x_search failed: {e}"))?;
+                let (results, summary, _citations) = xai::x_search(
+                    &http,
+                    &api_key,
+                    query,
+                    max_results,
+                    None,
+                    None,
+                    model,
+                    45,
+                    None,
+                    None,
+                    false,
+                )
+                .await
+                .map_err(|e| format!("x_search failed: {e}"))?;
 
                 json_content(serde_json::json!({
                     "type": "success",

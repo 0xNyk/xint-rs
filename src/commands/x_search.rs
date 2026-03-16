@@ -22,14 +22,18 @@ pub async fn run(args: &XSearchArgs, config: &Config) -> Result<()> {
     let timeout = args.timeout_seconds as u64;
     let from_date = args.from_date.as_deref();
     let to_date = args.to_date.as_deref();
-    let excluded_domains: Option<Vec<String>> = args
-        .exclude_domains
-        .as_ref()
-        .map(|s| s.split(',').map(|d| d.trim().to_string()).filter(|d| !d.is_empty()).collect());
-    let allowed_domains: Option<Vec<String>> = args
-        .allow_domains
-        .as_ref()
-        .map(|s| s.split(',').map(|d| d.trim().to_string()).filter(|d| !d.is_empty()).collect());
+    let excluded_domains: Option<Vec<String>> = args.exclude_domains.as_ref().map(|s| {
+        s.split(',')
+            .map(|d| d.trim().to_string())
+            .filter(|d| !d.is_empty())
+            .collect()
+    });
+    let allowed_domains: Option<Vec<String>> = args.allow_domains.as_ref().map(|s| {
+        s.split(',')
+            .map(|d| d.trim().to_string())
+            .filter(|d| !d.is_empty())
+            .collect()
+    });
 
     let mut per_query: Vec<QueryResult> = Vec::new();
     let mut had_errors = false;
