@@ -651,7 +651,7 @@ async fn run_sync(args: &BookmarkKbArgs, config: &Config) -> Result<()> {
         let mut uploaded = 0;
         let mut attached = 0;
 
-        for (topic, _) in &topic_groups {
+        for topic in topic_groups.keys() {
             let safe_name = topic.to_lowercase().replace(['/', ' ', '\\'], "-");
             let filename = format!("{safe_name}.md");
             let filepath = exports_dir.join(&filename);

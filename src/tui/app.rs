@@ -59,6 +59,7 @@ pub enum PendingAction {
     Quit,
 }
 
+#[derive(Default)]
 pub struct SessionState {
     pub last_search: Option<String>,
     pub last_location: Option<String>,
@@ -68,21 +69,6 @@ pub struct SessionState {
     pub last_command: Option<String>,
     pub last_status: Option<String>,
     pub last_output_lines: Vec<String>,
-}
-
-impl Default for SessionState {
-    fn default() -> Self {
-        Self {
-            last_search: None,
-            last_location: None,
-            last_username: None,
-            last_tweet_ref: None,
-            last_article_url: None,
-            last_command: None,
-            last_status: None,
-            last_output_lines: Vec::new(),
-        }
-    }
 }
 
 pub struct App {

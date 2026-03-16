@@ -58,9 +58,9 @@ pub async fn run(args: &ContentAuditArgs, config: &Config, client: &XClient) -> 
     tweet_context.push_str("TOP PERFORMING TWEETS:\n");
     for (i, t) in top_5.iter().enumerate() {
         tweet_context.push_str(&format!(
-            "{}. [{}% ER, {} likes, {} impressions]\n\"{}\"\n\n",
+            "{}. [{:.2}% ER, {} likes, {} impressions]\n\"{}\"\n\n",
             i + 1,
-            format!("{:.2}", engagement_rate(t)),
+            engagement_rate(t),
             t.metrics.likes,
             t.metrics.impressions,
             truncate(&t.text, 300),
@@ -69,9 +69,9 @@ pub async fn run(args: &ContentAuditArgs, config: &Config, client: &XClient) -> 
     tweet_context.push_str("\nLOWEST PERFORMING TWEETS:\n");
     for (i, t) in bottom_5.iter().enumerate() {
         tweet_context.push_str(&format!(
-            "{}. [{}% ER, {} likes, {} impressions]\n\"{}\"\n\n",
+            "{}. [{:.2}% ER, {} likes, {} impressions]\n\"{}\"\n\n",
             i + 1,
-            format!("{:.2}", engagement_rate(t)),
+            engagement_rate(t),
             t.metrics.likes,
             t.metrics.impressions,
             truncate(&t.text, 300),
@@ -79,7 +79,7 @@ pub async fn run(args: &ContentAuditArgs, config: &Config, client: &XClient) -> 
     }
 
     let total_tweets = tweets.len();
-    let avg_er = tweets.iter().map(|t| engagement_rate(t)).sum::<f64>() / total_tweets as f64;
+    let avg_er = tweets.iter().map(engagement_rate).sum::<f64>() / total_tweets as f64;
     let avg_likes =
         tweets.iter().map(|t| t.metrics.likes).sum::<u64>() as f64 / total_tweets as f64;
 
