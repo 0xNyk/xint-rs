@@ -1,5 +1,6 @@
 use crate::models::Tweet;
 use chrono::Utc;
+use colored::Colorize;
 use serde::Serialize;
 use serde_json::{Map, Value};
 
@@ -87,9 +88,13 @@ pub fn format_tweet_terminal(t: &Tweet, index: Option<usize>, full: bool) -> Str
     };
     let clean_text = clean_tco(&text);
 
+    let username_display = format!("@{}", t.username).cyan();
+    let engagement_display = engagement.yellow();
+    let time_display = time.dimmed();
+
     let mut out = format!(
-        "{}@{} ({} \u{00b7} {})\n{}",
-        prefix, t.username, engagement, time, clean_text
+        "{}{} ({} \u{00b7} {})\n{}",
+        prefix, username_display, engagement_display, time_display, clean_text
     );
 
     if let Some(u) = t.urls.first() {
@@ -118,7 +123,7 @@ pub fn format_results_terminal(tweets: &[Tweet], query: Option<&str>, limit: usi
         out.push_str(&format!(
             "\u{1f50d} \"{}\" \u{2014} {} results\n\n",
             q,
-            tweets.len()
+            tweets.len().to_string().yellow()
         ));
     }
 
@@ -157,12 +162,35 @@ pub fn format_profile_terminal(user: &serde_json::Value, tweets: &[Tweet]) -> St
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
 
+    let username_display = format!("@{username}").cyan();
+    let followers_display = compact_number(followers).yellow();
+    let tweet_count_display = compact_number(tweet_count).yellow();
+
+    let subscription_badge = user
+        .get("subscription_type")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| format!(" [{}]", s))
+        .unwrap_or_default();
+
+    let connection_info = user
+        .get("connection_status")
+        .and_then(|v| v.as_array())
+        .filter(|arr| !arr.is_empty())
+        .map(|arr| {
+            let statuses: Vec<&str> = arr.iter().filter_map(|v| v.as_str()).collect();
+            format!(" ({})", statuses.join(", "))
+        })
+        .unwrap_or_default();
+
     let mut out = format!(
-        "\u{1f464} @{} \u{2014} {}\n{} followers \u{00b7} {} tweets\n",
-        username,
+        "\u{1f464} {} \u{2014} {}{}{}\n{} followers \u{00b7} {} tweets\n",
+        username_display,
         name,
-        compact_number(followers),
-        compact_number(tweet_count)
+        subscription_badge,
+        connection_info,
+        followers_display,
+        tweet_count_display
     );
 
     if !desc.is_empty() {

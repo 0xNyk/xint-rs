@@ -223,6 +223,19 @@ pub fn parse_tweets(raw: &RawResponse) -> Vec<Tweet> {
                 })
             });
 
+            let organic_metrics = t.get("organic_metrics").map(|om| OrganicMetrics {
+                impression_count: om.get("impression_count").and_then(|v| v.as_u64()).unwrap_or(0),
+                like_count: om.get("like_count").and_then(|v| v.as_u64()).unwrap_or(0),
+                reply_count: om.get("reply_count").and_then(|v| v.as_u64()).unwrap_or(0),
+                retweet_count: om.get("retweet_count").and_then(|v| v.as_u64()).unwrap_or(0),
+            });
+
+            let non_public_metrics = t.get("non_public_metrics").map(|npm| NonPublicMetrics {
+                impression_count: npm.get("impression_count").and_then(|v| v.as_u64()).unwrap_or(0),
+                url_link_clicks: npm.get("url_link_clicks").and_then(|v| v.as_u64()).unwrap_or(0),
+                user_profile_clicks: npm.get("user_profile_clicks").and_then(|v| v.as_u64()).unwrap_or(0),
+            });
+
             Some(Tweet {
                 id,
                 text,
@@ -237,6 +250,8 @@ pub fn parse_tweets(raw: &RawResponse) -> Vec<Tweet> {
                 hashtags,
                 tweet_url,
                 article,
+                organic_metrics,
+                non_public_metrics,
             })
         })
         .collect()
@@ -254,19 +269,19 @@ pub fn parse_since(since: &str) -> Option<String> {
             _ => return None,
         };
         let start = chrono::Utc::now() - chrono::Duration::milliseconds(ms);
-        return Some(start.to_rfc3339());
+        return Some(start.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
     }
 
     // ISO 8601
     if since.contains('T') || since.contains('-') {
         if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(since) {
-            return Some(dt.to_rfc3339());
+            return Some(dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
         }
         // Try date-only
         if let Ok(dt) = chrono::NaiveDate::parse_from_str(since, "%Y-%m-%d") {
             let dt = dt.and_hms_opt(0, 0, 0)?;
             let dt = chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(dt, chrono::Utc);
-            return Some(dt.to_rfc3339());
+            return Some(dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
         }
     }
 
@@ -384,7 +399,7 @@ pub async fn get_profile(
     include_replies: bool,
 ) -> Result<(serde_json::Value, Vec<Tweet>)> {
     let path =
-        format!("users/by/username/{username}?user.fields=public_metrics,description,created_at");
+        format!("users/by/username/{username}?user.fields=public_metrics,description,created_at,connection_status,subscription_type");
     let raw = client.bearer_get(&path, token).await?;
 
     let user = match &raw.data {
@@ -400,6 +415,110 @@ pub async fn get_profile(
 
     let tweets = tweets.into_iter().take(count as usize).collect();
     Ok((user, tweets))
+}
+
+/// Get users who reposted a tweet.
+pub async fn get_reposts(
+    client: &XClient,
+    token: &str,
+    tweet_id: &str,
+    max_results: u32,
+) -> Result<Vec<serde_json::Value>> {
+    let per_page = max_results.min(100);
+    let path = format!(
+        "tweets/{tweet_id}/retweeted_by?user.fields=id,username,name,public_metrics,description&max_results={per_page}"
+    );
+    let raw = client.bearer_get(&path, token).await?;
+    Ok(raw
+        .data
+        .as_ref()
+        .and_then(|d| d.as_array())
+        .cloned()
+        .unwrap_or_default())
+}
+
+/// Search for users by keyword.
+pub async fn search_users(
+    client: &XClient,
+    token: &str,
+    query: &str,
+    max_results: u32,
+) -> Result<Vec<serde_json::Value>> {
+    let per_page = max_results.min(100);
+    let encoded = urlencoding::encode(query);
+    let path = format!(
+        "users/search?query={encoded}&max_results={per_page}&user.fields=id,username,name,public_metrics,description,created_at"
+    );
+    let raw = client.bearer_get(&path, token).await?;
+    Ok(raw
+        .data
+        .as_ref()
+        .and_then(|d| d.as_array())
+        .cloned()
+        .unwrap_or_default())
+}
+
+/// Fetch authenticated user's own timeline (requires OAuth).
+#[allow(clippy::too_many_arguments)]
+pub async fn get_user_timeline(
+    client: &XClient,
+    access_token: &str,
+    user_id: &str,
+    max_results: u32,
+    pages: u32,
+    exclude_replies: bool,
+    exclude_retweets: bool,
+    since: Option<&str>,
+) -> Result<Vec<Tweet>> {
+    let per_page = max_results.min(100);
+    let mut excludes = Vec::new();
+    if exclude_replies {
+        excludes.push("replies");
+    }
+    if exclude_retweets {
+        excludes.push("retweets");
+    }
+    let exclude_param = if excludes.is_empty() {
+        String::new()
+    } else {
+        format!("&exclude={}", excludes.join(","))
+    };
+
+    let timeline_fields = "tweet.fields=created_at,public_metrics,non_public_metrics,organic_metrics,entities,note_tweet&expansions=author_id&user.fields=username,name,public_metrics";
+
+    let mut time_filter = String::new();
+    if let Some(s) = since {
+        if let Some(ts) = parse_since(s) {
+            time_filter = format!("&start_time={ts}");
+        }
+    }
+
+    let mut all_tweets = Vec::new();
+    let mut next_token: Option<String> = None;
+
+    for page in 0..pages {
+        let pagination = match &next_token {
+            Some(t) => format!("&pagination_token={t}"),
+            None => String::new(),
+        };
+        let path = format!(
+            "users/{user_id}/tweets?max_results={per_page}&{timeline_fields}{exclude_param}{time_filter}{pagination}"
+        );
+
+        let raw = client.oauth_get(&path, access_token).await?;
+        let tweets = parse_tweets(&raw);
+        all_tweets.extend(tweets);
+
+        next_token = raw.meta.and_then(|m| m.next_token);
+        if next_token.is_none() {
+            break;
+        }
+        if page < pages - 1 {
+            crate::client::rate_delay().await;
+        }
+    }
+
+    Ok(all_tweets)
 }
 
 /// Sort tweets by engagement metric.

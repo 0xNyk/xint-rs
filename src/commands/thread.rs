@@ -10,9 +10,13 @@ use crate::format;
 pub async fn run(args: &ThreadArgs, config: &Config, client: &XClient) -> Result<()> {
     let token = config.require_bearer_token()?;
 
-    eprintln!("Fetching thread {}...", args.tweet_id);
-
-    let tweets = twitter::get_thread(client, token, &args.tweet_id, args.pages).await?;
+    let spinner = crate::spinner::Spinner::new(&format!("Fetching thread {}...", args.tweet_id));
+    let result = twitter::get_thread(client, token, &args.tweet_id, args.pages).await;
+    match &result {
+        Ok(tweets) => spinner.done(&format!("Thread: {} tweets", tweets.len())),
+        Err(_) => spinner.fail("Failed to fetch thread"),
+    }
+    let tweets = result?;
 
     costs::track_cost(
         &config.costs_path(),

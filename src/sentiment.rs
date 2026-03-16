@@ -61,7 +61,7 @@ pub async fn analyze_sentiment(
         ];
 
         let opts = GrokOpts {
-            model: model.unwrap_or("grok-3-mini").to_string(),
+            model: model.unwrap_or("grok-4-1-fast").to_string(),
             temperature: 0.3,
             max_tokens: 2048,
         };

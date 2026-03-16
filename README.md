@@ -83,6 +83,8 @@ cargo build --release
 | Trends | `xint trends` |
 | AI Analyze | `xint analyze "best?"` |
 | Report | `xint report "crypto"` |
+| Reposts | `xint reposts <tweet_id>` |
+| User Search | `xint users "AI researcher"` |
 | Article | `xint article <url> --ai "summarize"` |
 | Capabilities | `xint capabilities --json` |
 | TUI | `xint tui` |
@@ -291,6 +293,22 @@ xint media 1900100012345678901 --photos-only
 xint media 1900100012345678901 --name-template "{username}-{created_at}-{index}"
 ```
 
+## Reposts
+
+```bash
+# See who reposted a tweet
+xint reposts <tweet_id>
+xint reposts <tweet_id> --limit 50 --json
+```
+
+## User Search
+
+```bash
+# Find users by keyword
+xint users "AI researcher"
+xint users "solana dev" --limit 10 --json
+```
+
 ## Reports & Analysis
 
 ```bash
@@ -301,6 +319,8 @@ xint article "https://..." --ai "Summarize"
 # From X tweet (auto-extract linked article URL)
 xint article "https://x.com/user/status/123" --ai "Summarize"
 ```
+
+Default analysis model is now `grok-4-1-fast`.
 
 ## xAI Features
 

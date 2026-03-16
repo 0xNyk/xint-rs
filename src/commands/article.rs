@@ -14,22 +14,22 @@ pub async fn run(args: &ArticleArgs, config: &Config) -> Result<()> {
     let mut article: Option<Article> = None;
 
     if is_x_tweet_like_url(&url) {
-        println!("🔍 Fetching tweet to extract linked article...");
+        eprintln!("Fetching tweet to extract linked article...");
         let token = config.require_bearer_token()?;
         let client = XClient::new()?;
         let (tweet, article_url, inline_article) =
             fetch_tweet_for_article(&client, token, &url).await?;
 
         if let Some(inline) = inline_article {
-            println!("📄 Found X Article: {}\n", inline.title);
+            eprintln!("Found X Article: {}\n", inline.title);
             article = Some(inline);
         } else if let Some(found) = article_url {
-            println!("📝 Tweet: {}", tweet.tweet_url);
-            println!("📄 Found link: {found}\n");
+            eprintln!("Tweet: {}", tweet.tweet_url);
+            eprintln!("Found link: {found}\n");
             url = found;
         } else {
-            println!("📝 No external link found in tweet.");
-            println!("   Tweet: {}", tweet.tweet_url);
+            eprintln!("No external link found in tweet.");
+            eprintln!("   Tweet: {}", tweet.tweet_url);
             return Ok(());
         }
     }
@@ -51,19 +51,19 @@ pub async fn run(args: &ArticleArgs, config: &Config) -> Result<()> {
             word_count: 0,
         };
         if let Ok(xai_key) = config.require_xai_key() {
-            println!("🔍 Searching web for article context...");
+            eprintln!("Searching web for article context...");
             let http = reqwest::Client::new();
             let timeout_secs = resolve_article_timeout_secs();
             match xai::web_search_article(&http, xai_key, &url, "", &args.model, timeout_secs).await
             {
                 Ok(raw) => parse_article_json(&raw, &url, "x.com", args.full),
                 Err(_) => {
-                    println!("⚠️  Could not enrich article from web. Showing metadata only.\n");
+                    eprintln!("Could not enrich article from web. Showing metadata only.\n");
                     meta_article
                 }
             }
         } else {
-            println!("⚠️  No xAI key — showing metadata only.\n");
+            eprintln!("No xAI key \u{2014} showing metadata only.\n");
             meta_article
         }
     } else {
@@ -81,7 +81,7 @@ pub async fn run(args: &ArticleArgs, config: &Config) -> Result<()> {
 
     // If AI prompt provided, analyze the article
     if let Some(ai_prompt) = &args.ai {
-        println!("🤖 Analyzing with Grok...\n");
+        eprintln!("Analyzing with Grok...\n");
 
         let xai_key = config.require_xai_key()?;
         let http = reqwest::Client::new();
@@ -385,6 +385,8 @@ mod tests {
             hashtags: vec![],
             tweet_url: "https://x.com/alice/status/1900100012345678901".to_string(),
             article: None,
+            organic_metrics: None,
+            non_public_metrics: None,
         }
     }
 

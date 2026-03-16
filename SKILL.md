@@ -23,7 +23,10 @@ credentials:
     required: false
 required_env_vars:
   - X_BEARER_TOKEN
+requiredEnvVars:
+  - X_BEARER_TOKEN
 primary_credential: X_BEARER_TOKEN
+primaryCredential: X_BEARER_TOKEN
 security:
   always: false
   autonomous: false
@@ -43,7 +46,7 @@ Fast, zero-dependency binary for X/Twitter search, analysis, and engagement from
 This skill requires sensitive credentials. Follow these guidelines:
 
 ### Credentials
-- **X_BEARER_TOKEN**: Required for X API. Treat as a secret - prefer exported environment variables (optional project-local `.env`)
+- **X_BEARER_TOKEN**: Required for X API. Treat as a secret - only set in environment or `.env` file
 - **XAI_API_KEY**: Optional, needed for AI analysis. Also a secret
 - **X_CLIENT_ID**: Optional, needed for OAuth. Less sensitive but don't expose publicly
 - **XAI_MANAGEMENT_API_KEY**: Optional, for collections management
@@ -54,15 +57,15 @@ This skill requires sensitive credentials. Follow these guidelines:
 - Review exported data before sharing - may contain sensitive search queries
 
 ### Webhooks
-- `watch` and `stream` can send data to webhook endpoints
-- Remote endpoints must use `https://` (`http://` is accepted only for localhost/loopback)
-- Optional host allowlist: `XINT_WEBHOOK_ALLOWED_HOSTS=hooks.example.com,*.internal.example`
-- Avoid sending sensitive search queries or token-bearing URLs to third-party destinations
+- The `watch` command supports `--webhook` to send data to external URLs
+- Only use webhooks you control (your own servers, Slack/Discord you own)
+- Don't pass sensitive URLs as webhook targets
 
-### Runtime Notes
-- This file documents usage and safety controls for the CLI only.
-- Network listeners are opt-in (`mcp --sse`) and disabled by default
-- Webhook delivery is opt-in (`--webhook`) and disabled by default
+### Agent Execution Boundaries
+- This file documents commands and safety limits only
+- Require explicit user approval before install/clone actions
+- Use only documented commands and flags
+- Require explicit user approval before network-facing modes (`mcp --sse`, `watch --webhook`)
 
 ### Installation
 - For required tools: prefer OS package managers over `curl | bash` when possible
@@ -103,16 +106,29 @@ xint search "AI agents" --save                # Save to data/exports/
 ```bash
 xint watch "AI agents" -i 5m                  # Poll every 5 minutes
 xint watch "@elonmusk" -i 30s                 # Watch user (auto-expands to from:)
-xint watch "bitcoin" --webhook https://hooks.example.com/ingest  # POST new tweets to webhook
+xint watch "bitcoin" --webhook https://example.com/webhook  # POST new tweets to webhook
 xint watch "topic" --jsonl                    # Machine-readable output
 ```
 
 ### Profiles & Tweets
 ```bash
 xint profile elonmusk                         # User profile + recent tweets
-xint profile elonmusk --json                  # JSON output
+xint profile elonmusk --json                  # JSON output (includes connection_status, subscription_type)
 xint tweet 1234567890                         # Fetch single tweet
 xint thread 1234567890                        # Fetch conversation thread
+```
+
+### Reposts (who reposted a tweet)
+```bash
+xint reposts <tweet_id>                       # List users who reposted
+xint reposts <tweet_id> --limit 50            # Limit results
+xint reposts <tweet_id> --json                # JSON output
+```
+
+### User Search
+```bash
+xint users "AI researcher"                    # Find users by keyword
+xint users "solana dev" --limit 10 --json     # JSON output with limit
 ```
 
 ### Article Fetching (requires XAI_API_KEY)
@@ -146,11 +162,13 @@ xint trends --locations                     # List supported locations
 
 ### AI Analysis (requires XAI_API_KEY)
 ```bash
-xint analyze "What's the sentiment around AI?"
+xint analyze "What's the sentiment around AI?"       # Default model: grok-4-1-fast
 xint analyze --tweets saved.json              # Analyze tweets from file
 cat tweets.json | xint analyze --pipe         # Analyze from stdin
-xint analyze "question"                              # Free-form analysis request
+xint analyze "question" --model grok-4        # Use specific model
 ```
+
+Available models: grok-4, grok-4-1-fast (default), grok-3, grok-3-mini, grok-2
 
 ### Intelligence Reports
 ```bash
@@ -197,7 +215,7 @@ xint watchlist check @username                # Check if watched
 
 ### xAI X Search (no cookies/GraphQL)
 
-Search X via xAI's hosted x_search tool. No bearer token or cookies needed — only `XAI_API_KEY`.
+Search X via xAI's hosted x_search tool (Responses API). No bearer token or cookies needed — only `XAI_API_KEY`.
 
 ```bash
 # Create a queries file
@@ -209,11 +227,15 @@ xint x-search --queries-file queries.json --out-md report.md --out-json raw.json
 # Date range filter
 xint x-search --queries-file queries.json --from-date 2026-02-01 --to-date 2026-02-15
 
-# Emit memory candidates (deduped against existing workspace sources)
-xint x-search --queries-file queries.json --workspace /path/to/workspace --emit-candidates
+# Domain filtering
+xint x-search --queries-file queries.json --allow-domains arxiv.org,github.com
+xint x-search --queries-file queries.json --exclude-domains spam.com
+
+# Image understanding in search results
+xint x-search --queries-file queries.json --vision
 
 # Custom model
-xint x-search --queries-file queries.json --model grok-3
+xint x-search --queries-file queries.json --model grok-4-1-fast
 ```
 
 ### xAI Collections Knowledge Base
@@ -267,3 +289,10 @@ X API costs ~$0.005/tweet read. Budget system prevents runaway costs:
 - Default: $1.00/day limit
 - Set custom: `xint costs budget <amount>`
 - Watch command auto-stops at budget limit
+
+### xAI Model Pricing (per 1M tokens)
+- grok-4-1-fast: $0.20 input / $0.50 output (default — best value)
+- grok-4: $3.00 input / $15.00 output
+- grok-3: $3.00 input / $15.00 output
+- grok-3-mini: $0.10 input / $0.40 output
+- grok-2: $2.00 input / $10.00 output
