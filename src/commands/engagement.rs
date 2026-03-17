@@ -487,3 +487,26 @@ async fn resolve_target_user(
 fn is_likely_user_id(input: &str) -> bool {
     !input.is_empty() && input.chars().all(|c| c.is_ascii_digit())
 }
+
+// ---------------------------------------------------------------------------
+// Reply to tweet
+// ---------------------------------------------------------------------------
+
+/// Post a reply to a tweet.
+pub async fn reply_to_tweet(
+    client: &XClient,
+    access_token: &str,
+    tweet_id: &str,
+    text: &str,
+) -> Result<String> {
+    let body = serde_json::json!({
+        "text": text,
+        "reply": { "in_reply_to_tweet_id": tweet_id }
+    });
+    let resp = client.oauth_post("tweets", access_token, Some(&body)).await?;
+    let reply_id = resp["data"]["id"]
+        .as_str()
+        .unwrap_or("unknown")
+        .to_string();
+    Ok(reply_id)
+}

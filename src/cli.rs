@@ -218,6 +218,10 @@ pub enum Commands {
     #[command(alias = "bkb")]
     BookmarkKb(BookmarkKbArgs),
 
+    /// Strategic engagement: discover, generate replies, and optionally post (OAuth required)
+    #[command(alias = "eg")]
+    Engage(EngageArgs),
+
     /// Generate shell completions
     Completions(CompletionsArgs),
 }
@@ -1031,6 +1035,52 @@ pub struct BookmarkKbArgs {
     /// Collection name for sync
     #[arg(long, default_value = "xint-bookmarks")]
     pub collection_name: String,
+}
+
+// ---------------------------------------------------------------------------
+// Engage
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+#[command(
+    after_help = "Examples:\n  xint engage --niche \"AI agents\" --count 5\n  xint engage --niche \"typescript\" --links \"https://x.com/user/status/123\"\n  xint engage --niche \"AI\" --execute --count 1"
+)]
+pub struct EngageArgs {
+    /// Niche/topic keywords for tweet discovery
+    #[arg(long)]
+    pub niche: String,
+
+    /// Number of tweet targets
+    #[arg(long, default_value = "1")]
+    pub count: u32,
+
+    /// How far back to search (e.g. 1d, 7d)
+    #[arg(long, default_value = "1d")]
+    pub since: String,
+
+    /// Explicit URLs to promote (comma-separated)
+    #[arg(long)]
+    pub links: Option<String>,
+
+    /// Actually post replies (dry-run by default)
+    #[arg(long)]
+    pub execute: bool,
+
+    /// Save plan to data/exports/
+    #[arg(long)]
+    pub save: bool,
+
+    /// JSON output
+    #[arg(long)]
+    pub json: bool,
+
+    /// Grok model for reply generation
+    #[arg(long, default_value = "grok-4-1-fast")]
+    pub model: String,
+
+    /// Skip bookmark-kb lookup
+    #[arg(long)]
+    pub no_kb: bool,
 }
 
 // ---------------------------------------------------------------------------
