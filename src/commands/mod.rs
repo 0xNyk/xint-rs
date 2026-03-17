@@ -11,6 +11,7 @@ pub mod collections;
 pub mod content_audit;
 pub mod costs_cmd;
 pub mod diff;
+pub mod engage;
 pub mod engagement;
 pub mod growth;
 pub mod health;

@@ -180,6 +180,7 @@ async fn main() -> Result<()> {
         Some(Commands::BookmarkKb(args)) => {
             commands::bookmark_kb::run(&args, &config, &client).await
         }
+        Some(Commands::Engage(args)) => commands::engage::run(&args, &config, &client).await,
         Some(Commands::Mcp(args)) => mcp::run(args, &config, cli.policy).await,
         Some(Commands::Completions(args)) => {
             use clap::CommandFactory;
