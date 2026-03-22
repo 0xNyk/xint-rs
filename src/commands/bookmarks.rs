@@ -12,7 +12,7 @@ use crate::format;
 pub async fn run(args: &BookmarksArgs, config: &Config, client: &XClient) -> Result<()> {
     let client_id = config.require_client_id()?;
     let (access_token, tokens) =
-        oauth::get_valid_token(client, &config.tokens_path(), client_id).await?;
+        oauth::get_valid_token(client, &config.tokens_path(), client_id, config.client_secret.as_deref()).await?;
 
     let cache_key = format!("bookmarks:{}", tokens.user_id);
     let cache_params = format!("limit={}", args.limit);

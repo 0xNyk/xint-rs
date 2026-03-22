@@ -15,7 +15,7 @@ use crate::format;
 pub async fn run_likes(args: &LikesArgs, config: &Config, client: &XClient) -> Result<()> {
     let client_id = config.require_client_id()?;
     let (access_token, tokens) =
-        oauth::get_valid_token(client, &config.tokens_path(), client_id).await?;
+        oauth::get_valid_token(client, &config.tokens_path(), client_id, config.client_secret.as_deref()).await?;
 
     let cache_key = format!("likes:{}", tokens.user_id);
     let cache_ttl = 5 * 60 * 1000u64;
@@ -134,7 +134,7 @@ pub async fn run_like(
 
     let client_id = config.require_client_id()?;
     let (access_token, tokens) =
-        oauth::get_valid_token(client, &config.tokens_path(), client_id).await?;
+        oauth::get_valid_token(client, &config.tokens_path(), client_id, config.client_secret.as_deref()).await?;
 
     let body = serde_json::json!({ "tweet_id": args.tweet_id });
     let path = format!("users/{}/likes", tokens.user_id);
@@ -173,7 +173,7 @@ pub async fn run_unlike(
 
     let client_id = config.require_client_id()?;
     let (access_token, tokens) =
-        oauth::get_valid_token(client, &config.tokens_path(), client_id).await?;
+        oauth::get_valid_token(client, &config.tokens_path(), client_id, config.client_secret.as_deref()).await?;
 
     let path = format!("users/{}/likes/{}", tokens.user_id, args.tweet_id);
     let result = client.oauth_delete(&path, &access_token).await?;
@@ -210,7 +210,7 @@ pub async fn run_bookmark(
 
     let client_id = config.require_client_id()?;
     let (access_token, tokens) =
-        oauth::get_valid_token(client, &config.tokens_path(), client_id).await?;
+        oauth::get_valid_token(client, &config.tokens_path(), client_id, config.client_secret.as_deref()).await?;
 
     let body = serde_json::json!({ "tweet_id": args.tweet_id });
     let path = format!("users/{}/bookmarks", tokens.user_id);
@@ -257,7 +257,7 @@ pub async fn run_unbookmark(
 
     let client_id = config.require_client_id()?;
     let (access_token, tokens) =
-        oauth::get_valid_token(client, &config.tokens_path(), client_id).await?;
+        oauth::get_valid_token(client, &config.tokens_path(), client_id, config.client_secret.as_deref()).await?;
 
     let path = format!("users/{}/bookmarks/{}", tokens.user_id, args.tweet_id);
     let result = client.oauth_delete(&path, &access_token).await?;
@@ -288,7 +288,7 @@ pub async fn run_unbookmark(
 pub async fn run_following(args: &FollowingArgs, config: &Config, client: &XClient) -> Result<()> {
     let client_id = config.require_client_id()?;
     let (access_token, tokens) =
-        oauth::get_valid_token(client, &config.tokens_path(), client_id).await?;
+        oauth::get_valid_token(client, &config.tokens_path(), client_id, config.client_secret.as_deref()).await?;
 
     let (user_id, display_username) = if let Some(ref username) = args.username {
         let username = username.trim_start_matches('@');
@@ -392,7 +392,7 @@ pub async fn run_follow(
 
     let client_id = config.require_client_id()?;
     let (access_token, tokens) =
-        oauth::get_valid_token(client, &config.tokens_path(), client_id).await?;
+        oauth::get_valid_token(client, &config.tokens_path(), client_id, config.client_secret.as_deref()).await?;
 
     let (target_user_id, target_username) =
         resolve_target_user(client, &access_token, &args.target).await?;
@@ -431,7 +431,7 @@ pub async fn run_unfollow(
 
     let client_id = config.require_client_id()?;
     let (access_token, tokens) =
-        oauth::get_valid_token(client, &config.tokens_path(), client_id).await?;
+        oauth::get_valid_token(client, &config.tokens_path(), client_id, config.client_secret.as_deref()).await?;
 
     let (target_user_id, target_username) =
         resolve_target_user(client, &access_token, &args.target).await?;

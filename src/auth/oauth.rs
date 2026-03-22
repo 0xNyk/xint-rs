@@ -86,9 +86,11 @@ async fn exchange_code(
     code: &str,
     code_verifier: &str,
     client_id: &str,
+    client_secret: Option<&str>,
 ) -> Result<serde_json::Value> {
+    let basic_auth = client_secret.map(|s| (client_id, s));
     client
-        .post_form(
+        .post_form_auth(
             TOKEN_URL,
             &[
                 ("grant_type", "authorization_code"),
@@ -97,6 +99,7 @@ async fn exchange_code(
                 ("client_id", client_id),
                 ("code_verifier", code_verifier),
             ],
+            basic_auth,
         )
         .await
 }
@@ -124,16 +127,19 @@ pub async fn refresh_tokens(
     client: &XClient,
     tokens_path: &Path,
     client_id: &str,
+    client_secret: Option<&str>,
     tokens: &OAuthTokens,
 ) -> Result<OAuthTokens> {
+    let basic_auth = client_secret.map(|s| (client_id, s));
     let data = client
-        .post_form(
+        .post_form_auth(
             TOKEN_URL,
             &[
                 ("grant_type", "refresh_token"),
                 ("refresh_token", &tokens.refresh_token),
                 ("client_id", client_id),
             ],
+            basic_auth,
         )
         .await?;
 
@@ -175,6 +181,7 @@ pub async fn get_valid_token(
     client: &XClient,
     tokens_path: &Path,
     client_id: &str,
+    client_secret: Option<&str>,
 ) -> Result<(String, OAuthTokens)> {
     let tokens = load_tokens(tokens_path)
         .ok_or_else(|| anyhow::anyhow!("No OAuth tokens found. Run 'auth setup' first."))?;
@@ -183,7 +190,7 @@ pub async fn get_valid_token(
 
     if now >= tokens.expires_at - EXPIRY_BUFFER_MS {
         eprintln!("OAuth token expired, refreshing...");
-        let refreshed = refresh_tokens(client, tokens_path, client_id, &tokens).await?;
+        let refreshed = refresh_tokens(client, tokens_path, client_id, client_secret, &tokens).await?;
         eprintln!("Token refreshed for @{}", refreshed.username);
         let token = refreshed.access_token.clone();
         Ok((token, refreshed))
@@ -230,6 +237,7 @@ pub async fn auth_setup(
     client: &XClient,
     tokens_path: &Path,
     client_id: &str,
+    client_secret: Option<&str>,
     manual: bool,
 ) -> Result<()> {
     let code_verifier = generate_code_verifier();
@@ -263,7 +271,7 @@ pub async fn auth_setup(
     };
 
     eprintln!("\nExchanging authorization code for tokens...");
-    let token_data = exchange_code(client, &code, &code_verifier, client_id).await?;
+    let token_data = exchange_code(client, &code, &code_verifier, client_id, client_secret).await?;
 
     let access_token = token_data
         .get("access_token")

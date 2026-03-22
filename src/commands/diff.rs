@@ -54,7 +54,7 @@ pub async fn run(args: &DiffArgs, config: &Config, client: &XClient) -> Result<(
     // Get OAuth token
     let client_id = config.require_client_id()?;
     let (access_token, _tokens) =
-        oauth::get_valid_token(client, &config.tokens_path(), client_id).await?;
+        oauth::get_valid_token(client, &config.tokens_path(), client_id, config.client_secret.as_deref()).await?;
 
     eprintln!("Fetching {snap_type} for @{username}...");
 

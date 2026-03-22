@@ -209,13 +209,26 @@ impl XClient {
 
     /// POST with form-encoded body (for token exchange).
     pub async fn post_form(&self, url: &str, params: &[(&str, &str)]) -> Result<serde_json::Value> {
-        let res = self
+        self.post_form_auth(url, params, None).await
+    }
+
+    /// POST form with optional Basic auth (for confidential OAuth clients).
+    pub async fn post_form_auth(
+        &self,
+        url: &str,
+        params: &[(&str, &str)],
+        basic_auth: Option<(&str, &str)>,
+    ) -> Result<serde_json::Value> {
+        use base64::Engine;
+        let mut req = self
             .http
             .post(url)
-            .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
-            .form(params)
-            .send()
-            .await?;
+            .header(CONTENT_TYPE, "application/x-www-form-urlencoded");
+        if let Some((user, pass)) = basic_auth {
+            let encoded = base64::engine::general_purpose::STANDARD.encode(format!("{user}:{pass}"));
+            req = req.header(AUTHORIZATION, format!("Basic {encoded}"));
+        }
+        let res = req.form(params).send().await?;
 
         if !res.status().is_success() {
             let status = res.status().as_u16();

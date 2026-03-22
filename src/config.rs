@@ -5,6 +5,7 @@ use std::path::PathBuf;
 pub struct Config {
     pub bearer_token: Option<String>,
     pub client_id: Option<String>,
+    pub client_secret: Option<String>,
     pub xai_api_key: Option<String>,
     pub xai_management_api_key: Option<String>,
     pub data_dir: PathBuf,
@@ -42,6 +43,7 @@ impl Config {
 
         let bearer_token = non_empty_env("X_BEARER_TOKEN");
         let client_id = non_empty_env("X_CLIENT_ID");
+        let client_secret = non_empty_env("X_CLIENT_SECRET");
         let xai_api_key = non_empty_env("XAI_API_KEY");
         let xai_management_api_key = non_empty_env("XAI_MANAGEMENT_API_KEY");
 
@@ -51,6 +53,7 @@ impl Config {
         Ok(Self {
             bearer_token,
             client_id,
+            client_secret,
             xai_api_key,
             xai_management_api_key,
             data_dir,

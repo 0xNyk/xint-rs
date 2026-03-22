@@ -81,7 +81,7 @@ async fn run_mode(
 ) -> Result<()> {
     let client_id = config.require_client_id()?;
     let (access_token, tokens) =
-        oauth::get_valid_token(client, &config.tokens_path(), client_id).await?;
+        oauth::get_valid_token(client, &config.tokens_path(), client_id, config.client_secret.as_deref()).await?;
 
     let parts: Vec<String> = args.subcommand.clone().unwrap_or_default();
     let sub = parts.first().map(String::as_str).unwrap_or("list");

@@ -1014,7 +1014,7 @@ impl MCPServer {
                 .map_err(|e| e.to_string())?
                 .to_string();
             let (token, _) =
-                oauth::get_valid_token(&client, &runtime_config.tokens_path(), &client_id)
+                oauth::get_valid_token(&client, &runtime_config.tokens_path(), &client_id, runtime_config.client_secret.as_deref())
                     .await
                     .map_err(|e| e.to_string())?;
             Ok((client, token))

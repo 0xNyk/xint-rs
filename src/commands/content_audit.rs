@@ -14,7 +14,7 @@ pub async fn run(args: &ContentAuditArgs, config: &Config, client: &XClient) -> 
     let client_id = config.require_client_id()?;
     let api_key = config.require_xai_key()?;
     let (access_token, tokens) =
-        oauth::get_valid_token(client, &config.tokens_path(), client_id).await?;
+        oauth::get_valid_token(client, &config.tokens_path(), client_id, config.client_secret.as_deref()).await?;
 
     eprintln!("Fetching tweets (since {})...", args.since);
 

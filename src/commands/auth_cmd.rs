@@ -11,15 +11,17 @@ pub async fn run(args: &AuthArgs, config: &Config, client: &XClient) -> Result<(
     match sub {
         "setup" => {
             let client_id = config.require_client_id()?;
-            oauth::auth_setup(client, &config.tokens_path(), client_id, args.manual).await?;
+            let client_secret = config.client_secret.as_deref();
+            oauth::auth_setup(client, &config.tokens_path(), client_id, client_secret, args.manual).await?;
         }
         "status" => {
             oauth::auth_status(&config.tokens_path());
         }
         "refresh" => {
             let client_id = config.require_client_id()?;
+            let client_secret = config.client_secret.as_deref();
             let (_, tokens) =
-                oauth::get_valid_token(client, &config.tokens_path(), client_id).await?;
+                oauth::get_valid_token(client, &config.tokens_path(), client_id, client_secret).await?;
             println!("Token refreshed for @{}", tokens.username);
             let expires_in = tokens.expires_at - chrono::Utc::now().timestamp_millis();
             println!("Expires in {} minutes", expires_in / 60_000);
