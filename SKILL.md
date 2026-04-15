@@ -1,13 +1,12 @@
 ---
 name: xint-rs
 description: >
-  Fast X Intelligence CLI (Rust) — search, analyze, and engage on X/Twitter from the terminal.
-  Use when: (1) user says "x research", "search x for", "search twitter for", "what are people saying about",
-  "what's twitter saying", "check x for", "x search", "search x", (2) user wants real-time monitoring with "watch",
-  (3) user needs AI-powered analysis with Grok ("analyze", "sentiment"), (4) user needs intelligence reports ("report"),
-  (5) user wants to track followers ("diff"), (6) user needs trending topics ("trends").
-  Also supports: bookmarks, likes, following (OAuth), x-search, collections, CSV/JSON/JSONL export.
-  Non-goals: Not for posting tweets, not for DMs, not for enterprise features.
+  X Intelligence CLI for searching, monitoring, and analyzing X/Twitter from the terminal.
+  Use for X/Twitter research prompts such as "search x", "find tweets about", "what's X saying",
+  trend checks, follower diffs, real-time watch tasks, sentiment/report analysis, and bookmark-sync workflows.
+  Best when recent community discourse matters (library/API changes, launches, market or cultural events).
+  Supports search, watch, trends, bookmarks, likes/following (OAuth), Grok analysis, and JSON/JSONL/CSV/Markdown export.
+  Non-goals: posting original tweets, DMs, or enterprise-only features.
 credentials:
   - name: X_BEARER_TOKEN
     description: X API v2 bearer token for search, profile, thread, tweet, trends
