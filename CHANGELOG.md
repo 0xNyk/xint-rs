@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Forecast (2026-05-16)
+- **`xint costs forecast`** — mirrors xint TS. Projects end-of-month spend from MTD burn rate (or 7-day trailing average when MTD < 3 days). Includes top-3 expensive operations, share-of-spend, and confidence note. `--json` for structured output. New `forecast_month()` in `costs.rs` + `MonthForecast` / `ForecastOpShare` structs.
+
+### Added — Cost preview (2026-05-16)
+- **`--dry-run` flag** on `search` and `diff` — prints estimated cost preview + cache-hit prediction + endpoint, then exits 0 without any API call. New `dryrun.rs` module mirrors `xint/lib/dryrun.ts`.
+
+### Fixed
+- **Field-profile recalibration** — Mirror of TS fix. MINIMAL_FIELDS now keeps entities + conversation_id (parsed on every tweet read). STANDARD adds connection_status. EXTENDED adds article + note_tweet + subscription_type. `get_tweet` uses EXTENDED_FIELDS.
+- **Followers cost rate** — `costs.rs` had `followers` at `(0.0, 0.01)` (per_call); X API charges per user. Changed to `(0.01, 0.0)`. A 3000-follower diff now correctly previews at $30.
+
+### Added — X API efficiency pass (2026-05-16)
+- **Field profiles in `client.rs`** — `MINIMAL_FIELDS` / `STANDARD_FIELDS` / `EXTENDED_FIELDS` constants + `FieldLevel` enum + `fields_for()` helper. `FIELDS` is now an alias for `MINIMAL_FIELDS` so existing call sites get the cheap default. `SearchArgs` exposes `--full-fields` for opting into extended payloads.
+- **Followers snapshot cache (24h TTL)** — `commands/diff.rs` reuses the most recent snapshot when <24h old. `DiffArgs::fresh` (`--fresh`) bypasses the cache. Cuts the ~$50 cost of a 5000-follower diff to $0 on same-day repeats.
+- **Watch seed-window narrowing** — `WatchArgs::since` default changed from `1h` to `10m`. `--seed-window` is now an alias for `--since`.
+- **Archive search confirmation gate** — `SearchArgs` adds `--confirm`. `--full` / `--full-archive` without `--confirm` prints estimated max cost and exits 2.
+
+### Added — Grok credit-aware agent mode (2026-05)
+- **`credits` command** — Grok free-tier telemetry mirroring xint TS. Shows monthly burn against console.x.ai's $25 signup + $150/mo data-share. Subcommands: `--setup`, `--data-sharing on|off`. Triggered automatically by `analyze` when `XAI_API_KEY` is missing (exits 0 so agents can read the guide).
+- **`--budget` flag on `analyze`** — `cheap` (default, grok-4-1-fast) | `balanced` (grok-4.3) | `max` (grok-4.20-reasoning). Image inputs auto-route to grok-4.3.
+- **`cost_in_usd_ticks` tracking** — Authoritative cost from xAI's response `usage` is used when present; local pricing table is the fallback.
+- **`Config::try_xai_key()`** — Non-throwing variant of `require_xai_key()` so commands can present the credit guide instead of failing.
+- **Premium chat-routing tip** — Mirrors xint TS. Opt-in via `XINT_X_PREMIUM=Premium|Premium+|PremiumPlus` and `XINT_PREMIUM_TIPS=1`. For one-shot human queries, suggests pasting into https://grok.com to spend Premium chat allowance instead of API credits. Prints to stderr so JSON output stays clean.
+
 ### Added
 - **`reposts` command** — Look up who reposted a tweet (`GET /2/tweets/:id/retweeted_by`). Supports `--limit`, `--json` output.
 - **`users` command** — Search users by keyword (`GET /2/users/search`). Supports `--limit`, `--json` output.
@@ -16,6 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`--exclude-domains` / `--allow-domains` flags** on `x-search` — Domain filtering via xAI search tools.
 - **Inline citations** — `x-search` output now includes source citations from xAI Responses API.
 - **403 tier handling** — Graceful error messages when blocks/follows endpoints are restricted by API tier.
+
+### Changed — Grok credit-aware agent mode (2026-05)
+- **Grok model pricing refreshed (2026-05 retirement window)** — Added `grok-4.3` ($1.25/$2.50, 1M ctx). Pricing patterns now match `grok-4.20`, `grok-4.20-reasoning`, `grok-4.20-non-reasoning`, all `grok-4-1-fast*` variants. Retired-but-redirected models kept for graceful lookup post-2026-05-15.
+- **Vision default switched to `grok-4.3`** — `grok-2-vision` retires 2026-05-15; we move explicitly rather than rely on xAI's auto-redirect.
+- **402 error hint** — Points to `xint credits` and console.x.ai instead of generic message.
 
 ### Changed
 - **Default Grok model** — Switched from `grok-3-mini` to `grok-4-1-fast` across analyze, report, sentiment, and MCP tools ($0.20/$0.50 per 1M tokens — better price/performance).

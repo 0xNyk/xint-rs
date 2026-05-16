@@ -5,17 +5,91 @@ use std::path::Path;
 
 const XAI_ENDPOINT: &str = "https://api.x.ai/v1/chat/completions";
 
-// Rough pricing per 1M tokens (USD)
+pub const DEFAULT_MODEL: &str = "grok-4-1-fast";
+pub const DEFAULT_VISION_MODEL: &str = "grok-4.3";
+
+/// Budget tiers map to current Grok models. Cheap is the default — keeps
+/// free console.x.ai credits ($175/mo) stretching ~5x further than `max`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Budget {
+    Cheap,
+    Balanced,
+    Max,
+}
+
+impl std::str::FromStr for Budget {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "cheap" => Ok(Budget::Cheap),
+            "balanced" => Ok(Budget::Balanced),
+            "max" => Ok(Budget::Max),
+            other => Err(format!("budget must be cheap | balanced | max (got {other})")),
+        }
+    }
+}
+
+impl Budget {
+    pub fn model(self) -> &'static str {
+        match self {
+            Budget::Cheap => "grok-4-1-fast",
+            Budget::Balanced => "grok-4.3",
+            Budget::Max => "grok-4.20-reasoning",
+        }
+    }
+}
+
+pub fn resolve_model(explicit: Option<&str>, budget: Option<Budget>, has_image: bool) -> String {
+    if let Some(m) = explicit {
+        return m.to_string();
+    }
+    if has_image {
+        return DEFAULT_VISION_MODEL.to_string();
+    }
+    if let Some(b) = budget {
+        return b.model().to_string();
+    }
+    DEFAULT_MODEL.to_string()
+}
+
+// Pricing per 1M tokens (USD), current as of 2026-05-14.
+// xAI retires grok-4, grok-3*, grok-2*, grok-code-fast-1 on 2026-05-15
+// (auto-redirects to grok-4.3). Kept here as aliases for compat.
 fn model_pricing(model: &str) -> (f64, f64) {
     match model {
+        // Current lineup
+        "grok-4.3" => (1.25, 2.50),
+        "grok-4.20" | "grok-4.20-reasoning" | "grok-4.20-non-reasoning" => (2.00, 6.00),
+        "grok-4-1-fast"
+        | "grok-4-1-fast-reasoning"
+        | "grok-4-1-fast-non-reasoning" => (0.20, 0.50),
+        // Retiring 2026-05-15
+        "grok-4.20-beta" => (2.00, 6.00),
         "grok-4" => (3.00, 15.00),
-        "grok-4-1-fast" | "grok-4-1-fast-non-reasoning" => (0.20, 0.50),
-        "grok-4-1-fast-reasoning" => (0.20, 0.50),
+        "grok-code-fast-1" => (0.20, 1.50),
         "grok-3" => (3.00, 15.00),
         "grok-3-mini" => (0.10, 0.40),
-        "grok-2" => (2.00, 10.00),
+        "grok-2" | "grok-2-vision" => (2.00, 10.00),
         _ => (0.20, 0.50),
     }
+}
+
+/// Resolve true USD cost: prefer `cost_in_usd_ticks` (µUSD) from xAI's
+/// response when present; fall back to local estimate otherwise.
+fn cost_from_response(
+    ticks: Option<i64>,
+    model: &str,
+    prompt_tokens: u64,
+    completion_tokens: u64,
+) -> f64 {
+    if let Some(t) = ticks {
+        if t >= 0 {
+            return t as f64 / 1_000_000.0;
+        }
+    }
+    let (input_rate, output_rate) = model_pricing(model);
+    (prompt_tokens as f64 / 1_000_000.0) * input_rate
+        + (completion_tokens as f64 / 1_000_000.0) * output_rate
 }
 
 /// Estimate cost from token usage.
@@ -71,7 +145,10 @@ pub async fn grok_chat_tracked(
         bail!("xAI auth failed (401). Check your XAI_API_KEY.");
     }
     if status == 402 {
-        bail!("xAI payment required (402). Your account may be out of credits.");
+        bail!(
+            "xAI payment required (402). Your free tier may be exhausted — \
+             run `xint credits` to see your burn rate, or top up at https://console.x.ai"
+        );
     }
     if status == 429 {
         bail!("xAI rate limited (429). Try again in a moment.");
@@ -114,11 +191,14 @@ pub async fn grok_chat_tracked(
             .unwrap_or(0),
     };
 
-    // Track cost if costs_path provided
+    // xAI started returning `usage.cost_in_usd_ticks` (µUSD) in 2026-Q2; use
+    // authoritative value when present, fall back to our pricing table.
+    let ticks = data
+        .pointer("/usage/cost_in_usd_ticks")
+        .and_then(|v| v.as_i64());
+
     if let Some(cp) = costs_path {
-        let (input_rate, output_rate) = model_pricing(&model);
-        let cost_usd = (usage.prompt_tokens as f64 / 1_000_000.0) * input_rate
-            + (usage.completion_tokens as f64 / 1_000_000.0) * output_rate;
+        let cost_usd = cost_from_response(ticks, &model, usage.prompt_tokens, usage.completion_tokens);
         costs::track_cost_direct(cp, "grok_chat", XAI_ENDPOINT, cost_usd);
     }
 
@@ -280,4 +360,88 @@ pub async fn summarize_trends(
     ];
 
     grok_chat(http, api_key, &messages, opts).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::str::FromStr;
+
+    #[test]
+    fn budget_cheap_maps_to_grok_4_1_fast() {
+        assert_eq!(Budget::from_str("cheap").unwrap().model(), "grok-4-1-fast");
+    }
+
+    #[test]
+    fn budget_balanced_maps_to_grok_4_3() {
+        assert_eq!(Budget::from_str("balanced").unwrap().model(), "grok-4.3");
+    }
+
+    #[test]
+    fn budget_max_maps_to_grok_4_20_reasoning() {
+        assert_eq!(Budget::from_str("max").unwrap().model(), "grok-4.20-reasoning");
+    }
+
+    #[test]
+    fn budget_invalid_errors() {
+        assert!(Budget::from_str("bogus").is_err());
+    }
+
+    #[test]
+    fn resolve_model_default_is_cheap() {
+        assert_eq!(resolve_model(None, None, false), "grok-4-1-fast");
+    }
+
+    #[test]
+    fn resolve_model_image_overrides_budget() {
+        // Image input must auto-route to vision-capable model.
+        assert_eq!(
+            resolve_model(None, Some(Budget::Max), true),
+            DEFAULT_VISION_MODEL
+        );
+    }
+
+    #[test]
+    fn resolve_model_explicit_wins_over_budget() {
+        // Explicit --model must take precedence.
+        assert_eq!(
+            resolve_model(Some("grok-4.20"), Some(Budget::Cheap), false),
+            "grok-4.20"
+        );
+    }
+
+    #[test]
+    fn cost_from_response_prefers_ticks_when_present() {
+        // 1234 µUSD = $0.001234; local estimate would be ~$0.000045
+        let cost = cost_from_response(Some(1234), "grok-4-1-fast", 100, 50);
+        assert!((cost - 0.001234).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cost_from_response_falls_back_when_ticks_missing() {
+        // 1M prompt tokens × $0.20/M input = $0.20
+        let cost = cost_from_response(None, "grok-4-1-fast", 1_000_000, 0);
+        assert!((cost - 0.20).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cost_from_response_falls_back_when_ticks_negative() {
+        // Negative ticks would be a bug — fall back rather than record nonsense.
+        let cost = cost_from_response(Some(-1), "grok-4-1-fast", 1_000_000, 0);
+        assert!((cost - 0.20).abs() < 1e-9);
+    }
+
+    #[test]
+    fn pricing_grok_4_3_matches_2026_05_rates() {
+        // Lock in current Grok 4.3 pricing so a careless edit doesn't drift.
+        assert_eq!(model_pricing("grok-4.3"), (1.25, 2.50));
+    }
+
+    #[test]
+    fn pricing_grok_4_1_fast_variants_share_rate() {
+        let expected = (0.20, 0.50);
+        assert_eq!(model_pricing("grok-4-1-fast"), expected);
+        assert_eq!(model_pricing("grok-4-1-fast-reasoning"), expected);
+        assert_eq!(model_pricing("grok-4-1-fast-non-reasoning"), expected);
+    }
 }

@@ -7,6 +7,7 @@ mod client;
 mod commands;
 mod config;
 mod costs;
+mod dryrun;
 mod errors;
 mod format;
 mod mcp;
@@ -163,6 +164,7 @@ async fn main() -> Result<()> {
         Some(Commands::Trends(args)) => commands::trends::run(&args, &config, &client).await,
         Some(Commands::Analyze(args)) => commands::analyze::run(&args, &config).await,
         Some(Commands::Costs(args)) => commands::costs_cmd::run(&args, &config),
+        Some(Commands::Credits(args)) => commands::credits::run(&args, &config),
         Some(Commands::Health(args)) => commands::health::run(&args, &config, &client).await,
         Some(Commands::Capabilities(args)) => commands::capabilities::run(&args),
         Some(Commands::Watchlist(args)) => commands::watchlist::run(&args, &config),

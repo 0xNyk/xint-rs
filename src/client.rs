@@ -7,7 +7,101 @@ use crate::models::RawResponse;
 const BASE_URL: &str = "https://api.x.com/2";
 const RATE_DELAY_MS: u64 = 350;
 
-pub const FIELDS: &str = "tweet.fields=created_at,public_metrics,author_id,conversation_id,entities,article,note_tweet&expansions=author_id&user.fields=username,name,public_metrics,connection_status,subscription_type";
+// Field profiles — credit-efficiency wins (added 2026-05).
+// See xint/lib/api.ts for the design rationale. In short: most commands only
+// need text + author + metrics; requesting extended fields (article,
+// note_tweet, connection_status, subscription_type) bloats payloads with no
+// benefit. `FIELDS` is now a re-export of MINIMAL_FIELDS so unchanged call
+// sites get the cheap default; use STANDARD_FIELDS / EXTENDED_FIELDS when
+// the extra data is actually consumed downstream.
+// See lib/api.ts for the design rationale. MINIMAL keeps entities and
+// conversation_id (display-essential); STANDARD adds connection_status
+// (for relationship-aware commands); EXTENDED adds article + note_tweet
+// + subscription_type (Premium badge + long-form posts).
+pub const MINIMAL_FIELDS: &str = "tweet.fields=created_at,public_metrics,author_id,conversation_id,entities&expansions=author_id&user.fields=username,name,public_metrics";
+
+pub const STANDARD_FIELDS: &str = "tweet.fields=created_at,public_metrics,author_id,conversation_id,entities&expansions=author_id&user.fields=username,name,public_metrics,connection_status";
+
+pub const EXTENDED_FIELDS: &str = "tweet.fields=created_at,public_metrics,author_id,conversation_id,entities,article,note_tweet&expansions=author_id&user.fields=username,name,public_metrics,connection_status,subscription_type";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FieldLevel {
+    #[default]
+    Minimal,
+    Standard,
+    Extended,
+}
+
+pub fn fields_for(level: FieldLevel) -> &'static str {
+    match level {
+        FieldLevel::Minimal => MINIMAL_FIELDS,
+        FieldLevel::Standard => STANDARD_FIELDS,
+        FieldLevel::Extended => EXTENDED_FIELDS,
+    }
+}
+
+// Backward-compat alias — now resolves to MINIMAL_FIELDS so existing call
+// sites get the cheap default automatically.
+pub const FIELDS: &str = MINIMAL_FIELDS;
+
+#[cfg(test)]
+mod field_profile_tests {
+    use super::*;
+
+    #[test]
+    fn minimal_omits_the_truly_extra_fields() {
+        // Recalibrated 2026-05-16: entities + conversation_id are read by
+        // parseTweets on every call, so they MUST stay in MINIMAL.
+        assert!(!MINIMAL_FIELDS.contains("article"));
+        assert!(!MINIMAL_FIELDS.contains("note_tweet"));
+        assert!(!MINIMAL_FIELDS.contains("subscription_type"));
+    }
+
+    #[test]
+    fn minimal_keeps_display_essentials() {
+        assert!(MINIMAL_FIELDS.contains("public_metrics"));
+        assert!(MINIMAL_FIELDS.contains("username"));
+        assert!(MINIMAL_FIELDS.contains("author_id"));
+        assert!(MINIMAL_FIELDS.contains("entities"));
+        assert!(MINIMAL_FIELDS.contains("conversation_id"));
+    }
+
+    #[test]
+    fn standard_adds_connection_status() {
+        assert!(STANDARD_FIELDS.contains("connection_status"));
+        // Still a superset of minimal on the tweet side
+        assert!(STANDARD_FIELDS.contains("entities"));
+        assert!(STANDARD_FIELDS.contains("conversation_id"));
+    }
+
+    #[test]
+    fn extended_has_all_premium_fields() {
+        assert!(EXTENDED_FIELDS.contains("article"));
+        assert!(EXTENDED_FIELDS.contains("note_tweet"));
+        assert!(EXTENDED_FIELDS.contains("connection_status"));
+        assert!(EXTENDED_FIELDS.contains("subscription_type"));
+    }
+
+    #[test]
+    fn fields_for_resolves_correctly() {
+        assert_eq!(fields_for(FieldLevel::Minimal), MINIMAL_FIELDS);
+        assert_eq!(fields_for(FieldLevel::Standard), STANDARD_FIELDS);
+        assert_eq!(fields_for(FieldLevel::Extended), EXTENDED_FIELDS);
+    }
+
+    #[test]
+    fn fields_default_alias_is_minimal() {
+        // Backward-compat alias must be the cheap default so unchanged
+        // callers automatically pick up the savings.
+        assert_eq!(FIELDS, MINIMAL_FIELDS);
+    }
+
+    #[test]
+    fn fieldlevel_default_is_minimal() {
+        let default: FieldLevel = Default::default();
+        assert_eq!(default, FieldLevel::Minimal);
+    }
+}
 
 /// Shared HTTP client for X API calls.
 pub struct XClient {

@@ -1,18 +1,54 @@
 use anyhow::Result;
 use std::fs;
 use std::io::Read;
+use std::str::FromStr;
 
-use crate::api::grok;
+use crate::api::grok::{self, Budget};
 use crate::cli::AnalyzeArgs;
 use crate::config::Config;
 use crate::models::*;
 
 pub async fn run(args: &AnalyzeArgs, config: &Config) -> Result<()> {
-    let api_key = config.require_xai_key()?;
+    // Premium status from XINT_X_PREMIUM env var (user-set; no API call).
+    let premium_status = std::env::var("XINT_X_PREMIUM").ok();
+
+    // Pre-flight: if no XAI_API_KEY, print credit guide and exit 0 so the
+    // caller (often an AI agent) can read the onboarding text programmatically.
+    let api_key = match config.try_xai_key() {
+        Some(k) => k,
+        None => {
+            super::credits::print_credit_guide(premium_status.as_deref());
+            return Ok(());
+        }
+    };
+
+    // Premium-routing tip — opt-in via XINT_PREMIUM_TIPS=1 to avoid noise.
+    if std::env::var("XINT_PREMIUM_TIPS").as_deref() == Ok("1") {
+        let query = args.query.join(" ");
+        if let Some(tip) = super::credits::premium_chat_routing_tip(
+            premium_status.as_deref(),
+            args.pipe,
+            args.tweets.as_deref(),
+            None, // image flag not wired to Rust yet
+            &query,
+        ) {
+            eprintln!("{tip}\n");
+        }
+    }
+
     let http = reqwest::Client::new();
 
+    let budget = args
+        .budget
+        .as_deref()
+        .map(Budget::from_str)
+        .transpose()
+        .map_err(|e| anyhow::anyhow!(e))?;
+    let has_image = false; // image flag is TS-side only for now; PR3 mirrors it
+    let model = grok::resolve_model(args.model.as_deref(), budget, has_image);
+
     let opts = GrokOpts {
-        model: args.model.clone(),
+        model,
         ..Default::default()
     };
 
