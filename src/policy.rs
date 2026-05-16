@@ -47,6 +47,7 @@ pub fn command_name(cmd: &Commands) -> &'static str {
         Commands::Trends(_) => "trends",
         Commands::Analyze(_) => "analyze",
         Commands::Costs(_) => "costs",
+        Commands::Credits(_) => "credits",
         Commands::Health(_) => "health",
         Commands::Capabilities(_) => "capabilities",
         Commands::Watchlist(_) => "watchlist",

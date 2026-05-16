@@ -51,42 +51,107 @@ pub async fn run(args: &DiffArgs, config: &Config, client: &XClient) -> Result<(
         return Ok(());
     }
 
-    // Get OAuth token
-    let client_id = config.require_client_id()?;
-    let (access_token, _tokens) =
-        oauth::get_valid_token(client, &config.tokens_path(), client_id).await?;
+    // Dry-run preview. Max cost is pages × 1000 users × $0.01 per user —
+    // up to $50 for a 5000-follower account. Cache predictor checks if a
+    // fresh (<24h) snapshot exists.
+    if args.dry_run {
+        let max_units = args.pages as u64 * 1000;
+        let op = if args.following { "following_list" } else { "followers" };
+        let cost = crate::dryrun::estimate_cost(op, max_units, 1);
+        let cached = !args.fresh
+            && load_fresh_snapshot(&snapshots_dir, &username, snap_type, 24 * 60 * 60 * 1000).is_some();
+        let notes: Vec<&str> = if cached {
+            vec![
+                "Snapshot cache HIT predicted — real cost likely $0 (pass --fresh to bypass).",
+                "Max cost reached only if the account has many followers.",
+            ]
+        } else {
+            vec![
+                "No fresh snapshot found — full fetch will happen.",
+                "Max cost reached only if the account has many followers.",
+            ]
+        };
+        crate::dryrun::preview_and_exit(&crate::dryrun::DryRunEstimate {
+            command: &format!("diff @{username} ({snap_type})"),
+            endpoint: &format!("/2/users/{{id}}/{snap_type}"),
+            units: max_units,
+            unit_label: "users",
+            cost_usd: cost,
+            cache_predicted_hit: Some(cached),
+            cache_ttl_minutes: Some(24 * 60),
+            notes: &notes,
+        });
+    }
 
-    eprintln!("Fetching {snap_type} for @{username}...");
+    // Try the snapshot cache first — a 5000-follower fetch costs ~$50 but
+    // followers rarely change minute-to-minute. Reuse a snapshot <24h old
+    // unless --fresh was passed.
+    const SNAPSHOT_TTL_MS: u64 = 24 * 60 * 60 * 1000;
+    let mut users: Vec<UserSnapshot> = Vec::new();
+    let mut cache_hit = false;
 
-    // Look up user ID
-    let lookup_path = format!("users/by/username/{username}?user.fields=public_metrics");
-    let raw = client.oauth_get(&lookup_path, &access_token).await?;
-    let user_id = raw
-        .data
-        .as_ref()
-        .and_then(|d| d.get("id"))
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow::anyhow!("User @{username} not found"))?
-        .to_string();
+    if !args.fresh {
+        if let Some(cached) = load_fresh_snapshot(&snapshots_dir, &username, snap_type, SNAPSHOT_TTL_MS) {
+            let age_hours = chrono::Utc::now()
+                .signed_duration_since(
+                    chrono::DateTime::parse_from_rfc3339(&cached.timestamp)
+                        .map(|d| d.with_timezone(&chrono::Utc))
+                        .unwrap_or_else(|_| chrono::Utc::now()),
+                )
+                .num_minutes() as f64
+                / 60.0;
+            eprintln!(
+                "(cache hit — {} {}, {:.1}h old; pass --fresh to force re-fetch)",
+                cached.users.len(),
+                snap_type,
+                age_hours
+            );
+            users = cached.users;
+            cache_hit = true;
+        }
+    }
 
-    costs::track_cost(
-        &config.costs_path(),
-        "profile",
-        &format!("/2/users/by/username/{username}"),
-        1,
-    );
+    if !cache_hit {
+        // Get OAuth token
+        let client_id = config.require_client_id()?;
+        let (access_token, _tokens) =
+            oauth::get_valid_token(client, &config.tokens_path(), client_id).await?;
 
-    // Fetch current list
-    let users = fetch_user_list(client, &access_token, &user_id, snap_type, args.pages).await?;
+        if args.fresh {
+            eprintln!("Fetching {snap_type} for @{username} (--fresh, bypassing cache)...");
+        } else {
+            eprintln!("Fetching {snap_type} for @{username}...");
+        }
 
-    costs::track_cost(
-        &config.costs_path(),
-        snap_type,
-        &format!("/2/users/{user_id}/{snap_type}"),
-        users.len() as u64,
-    );
+        // Look up user ID
+        let lookup_path = format!("users/by/username/{username}?user.fields=public_metrics");
+        let raw = client.oauth_get(&lookup_path, &access_token).await?;
+        let user_id = raw
+            .data
+            .as_ref()
+            .and_then(|d| d.get("id"))
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("User @{username} not found"))?
+            .to_string();
 
-    eprintln!("Found {} {}", users.len(), snap_type);
+        costs::track_cost(
+            &config.costs_path(),
+            "profile",
+            &format!("/2/users/by/username/{username}"),
+            1,
+        );
+
+        users = fetch_user_list(client, &access_token, &user_id, snap_type, args.pages).await?;
+
+        costs::track_cost(
+            &config.costs_path(),
+            snap_type,
+            &format!("/2/users/{user_id}/{snap_type}"),
+            users.len() as u64,
+        );
+
+        eprintln!("Found {} {}", users.len(), snap_type);
+    }
 
     // Create current snapshot
     let current = Snapshot {
@@ -237,6 +302,25 @@ fn list_snapshots(dir: &Path, username: &str, snap_type: &str) -> Vec<String> {
     files.sort();
     files.reverse();
     files
+}
+
+/// Load the most recent snapshot if it's within the TTL. Same semantics as
+/// TS `loadFreshSnapshot`: returns None if no snapshot exists or it's stale.
+fn load_fresh_snapshot(
+    dir: &Path,
+    username: &str,
+    snap_type: &str,
+    ttl_ms: u64,
+) -> Option<Snapshot> {
+    let snap = load_latest_snapshot(dir, username, snap_type)?;
+    let ts = chrono::DateTime::parse_from_rfc3339(&snap.timestamp).ok()?;
+    let age_ms = chrono::Utc::now()
+        .signed_duration_since(ts.with_timezone(&chrono::Utc))
+        .num_milliseconds();
+    if age_ms < 0 || age_ms as u64 > ttl_ms {
+        return None;
+    }
+    Some(snap)
 }
 
 fn load_latest_snapshot(dir: &Path, username: &str, snap_type: &str) -> Option<Snapshot> {

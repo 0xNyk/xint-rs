@@ -168,6 +168,9 @@ pub enum Commands {
     #[command(alias = "cost")]
     Costs(CostsArgs),
 
+    /// Grok free-tier credit status (xAI console.x.ai)
+    Credits(CreditsArgs),
+
     /// Runtime health, auth checks, and reliability stats
     Health(HealthArgs),
 
@@ -266,9 +269,21 @@ pub struct SearchArgs {
     #[arg(long)]
     pub until: Option<String>,
 
-    /// Full-archive search
-    #[arg(long)]
+    /// Full-archive search (2x cost; requires --confirm)
+    #[arg(long, alias = "full-archive")]
     pub full: bool,
+
+    /// Confirm an expensive operation (used with --full)
+    #[arg(long)]
+    pub confirm: bool,
+
+    /// Print estimated cost without making any API call
+    #[arg(long)]
+    pub dry_run: bool,
+
+    /// Request extended tweet fields (entities, article, note_tweet, badges)
+    #[arg(long)]
+    pub full_fields: bool,
 
     /// Exclude replies
     #[arg(long)]
@@ -339,8 +354,10 @@ pub struct WatchArgs {
     #[arg(long, default_value = "10")]
     pub limit: usize,
 
-    /// Initial time window
-    #[arg(long, default_value = "1h")]
+    /// Initial seed window for the first poll. Narrowed from 1h to 10m in
+    /// 2026-05 — wider seeds cost up to $0.50 just to deduplicate. Widen
+    /// for slow topics with --since 1h.
+    #[arg(long, alias = "seed-window", default_value = "10m")]
     pub since: String,
 
     /// Suppress per-poll headers
@@ -417,6 +434,14 @@ pub struct DiffArgs {
     /// Max pages to fetch (default: 5)
     #[arg(long, default_value = "5")]
     pub pages: u32,
+
+    /// Bypass the 24h snapshot cache and force a live fetch
+    #[arg(long)]
+    pub fresh: bool,
+
+    /// Print estimated cost without making any API call
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -464,6 +489,14 @@ pub struct ThreadArgs {
     /// Pages to fetch
     #[arg(long, default_value = "2")]
     pub pages: u32,
+
+    /// Unroll thread into continuous text
+    #[arg(long)]
+    pub unroll: bool,
+
+    /// Format as markdown document (implies --unroll)
+    #[arg(long)]
+    pub markdown: bool,
 }
 
 #[derive(Parser)]
@@ -778,15 +811,19 @@ pub struct TrendsArgs {
 
 #[derive(Parser)]
 #[command(
-    after_help = "Examples:\n  xint analyze \"What are the top AI trends this week?\"\n  xint analyze \"Summarize sentiment\" --tweets results.json\n  xint search bitcoin | xint analyze --pipe \"What is the overall sentiment?\""
+    after_help = "Examples:\n  xint analyze \"What are the top AI trends this week?\"\n  xint analyze \"Summarize sentiment\" --tweets results.json\n  xint analyze --budget balanced \"Deep crypto market analysis\"\n  xint search bitcoin | xint analyze --pipe \"What is the overall sentiment?\""
 )]
 pub struct AnalyzeArgs {
     /// Query or question
     pub query: Vec<String>,
 
-    /// Grok model
-    #[arg(long, default_value = "grok-4-1-fast")]
-    pub model: String,
+    /// Budget tier: cheap (default, grok-4-1-fast) | balanced (grok-4.3) | max (grok-4.20-reasoning)
+    #[arg(long)]
+    pub budget: Option<String>,
+
+    /// Explicit Grok model (overrides --budget). Examples: grok-4.3, grok-4-1-fast, grok-4.20-reasoning
+    #[arg(long)]
+    pub model: Option<String>,
 
     /// Analyze tweets from JSON file
     #[arg(long)]
@@ -795,6 +832,24 @@ pub struct AnalyzeArgs {
     /// Read tweet JSON from stdin
     #[arg(long)]
     pub pipe: bool,
+}
+
+// ---------------------------------------------------------------------------
+// Credits (Grok free-tier telemetry)
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+#[command(
+    after_help = "Shows monthly burn rate against the xAI console.x.ai free tier\n($25 signup + $150/mo data-share = $175/mo total).\n\nX Premium does NOT include API credits — use this command's --setup output\nto see the honest onboarding flow for getting free API access."
+)]
+pub struct CreditsArgs {
+    /// Print the credit onboarding guide (Premium vs API distinction)
+    #[arg(long)]
+    pub setup: bool,
+
+    /// Toggle data-sharing opt-in (on/off)
+    #[arg(long)]
+    pub data_sharing: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

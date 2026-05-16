@@ -22,12 +22,14 @@ pub fn cost_rate(operation: &str) -> (f64, f64) {
         "tweet" => (0.005, 0.0),
         "trends" => (0.0, 0.10),
         "thread" => (0.005, 0.0),
-        "followers" | "following_list" => (0.0, 0.01),
+        // Per-user pricing for followers/following endpoints.
+        "followers" | "following_list" => (0.01, 0.0),
         "lists_list" | "lists_create" | "lists_update" | "lists_delete" => (0.0, 0.01),
         "list_members_list" | "list_members_add" | "list_members_remove" => (0.0, 0.01),
         "blocks_list" | "blocks_add" | "blocks_remove" => (0.0, 0.01),
         "mutes_list" | "mutes_add" | "mutes_remove" => (0.0, 0.01),
         "reposts" => (0.0, 0.01),
+        "news_search" => (0.0, 0.01),
         "users_search" => (0.0, 0.01),
         // xAI/Grok — rough estimates; actual cost tracked via track_cost_direct()
         "grok_chat" => (0.0, 0.0005),
@@ -260,6 +262,122 @@ pub fn today_costs(costs_path: &Path) -> DailyAggregate {
             tweets_read: 0,
             by_operation: HashMap::new(),
         })
+}
+
+// ---------------------------------------------------------------------------
+// Forecast
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct MonthForecast {
+    pub mtd_usd: f64,
+    pub projected_usd: f64,
+    pub days_elapsed: u32,
+    pub days_in_month: u32,
+    pub top_operations: Vec<ForecastOpShare>,
+    pub method: String,
+    pub confidence: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ForecastOpShare {
+    pub operation: String,
+    pub cost: f64,
+    pub share: f64,
+}
+
+fn days_in_month(year: i32, month: u32) -> u32 {
+    use chrono::Datelike;
+    // month is 1-indexed. Take the 1st of the next month minus one day.
+    let next_year = if month == 12 { year + 1 } else { year };
+    let next_month = if month == 12 { 1 } else { month + 1 };
+    chrono::NaiveDate::from_ymd_opt(next_year, next_month, 1)
+        .and_then(|d| d.pred_opt())
+        .map(|d| d.day())
+        .unwrap_or(30)
+}
+
+/// Project end-of-month spend from current MTD burn rate.
+/// Falls back to a 7-day trailing average when MTD has too little data.
+pub fn forecast_month(costs_path: &Path) -> MonthForecast {
+    use chrono::Datelike;
+    let data = load_data(costs_path);
+    let now = chrono::Utc::now();
+    let year = now.year();
+    let month = now.month();
+    let day = now.day();
+    let month_floor = format!("{year:04}-{month:02}-01");
+    let dim = days_in_month(year, month);
+
+    let month_days: Vec<_> = data
+        .daily
+        .iter()
+        .filter(|d| d.date.as_str() >= month_floor.as_str())
+        .collect();
+    let mtd: f64 = month_days.iter().map(|d| d.total_cost).sum();
+
+    // Per-operation spend this month
+    let mut by_op: HashMap<String, f64> = HashMap::new();
+    for d in &month_days {
+        for (op, stats) in &d.by_operation {
+            *by_op.entry(op.clone()).or_insert(0.0) += stats.cost;
+        }
+    }
+    let total_for_shares = mtd.max(1e-9);
+    let mut top_ops: Vec<ForecastOpShare> = by_op
+        .into_iter()
+        .map(|(operation, cost)| ForecastOpShare {
+            operation,
+            cost,
+            share: cost / total_for_shares,
+        })
+        .collect();
+    top_ops.sort_by(|a, b| {
+        b.cost
+            .partial_cmp(&a.cost)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    top_ops.truncate(3);
+
+    // Projection method
+    let (projected, method) = if day >= 3 {
+        ((mtd / day as f64) * dim as f64, "mtd_extrapolation")
+    } else {
+        // Trailing 7-day average × days_in_month
+        let cutoff = (now - chrono::Duration::days(7))
+            .format("%Y-%m-%d")
+            .to_string();
+        let last7: Vec<_> = data
+            .daily
+            .iter()
+            .filter(|d| d.date.as_str() >= cutoff.as_str())
+            .collect();
+        let last7_total: f64 = last7.iter().map(|d| d.total_cost).sum();
+        let avg_per_day = if !last7.is_empty() {
+            last7_total / last7.len() as f64
+        } else {
+            0.0
+        };
+        (avg_per_day * dim as f64, "7day_smoothed")
+    };
+
+    let confidence = if day >= 7 {
+        "high"
+    } else if day >= 3 {
+        "medium"
+    } else {
+        "low"
+    };
+
+    MonthForecast {
+        mtd_usd: (mtd * 1e4).round() / 1e4,
+        projected_usd: (projected * 1e4).round() / 1e4,
+        days_elapsed: day,
+        days_in_month: dim,
+        top_operations: top_ops,
+        method: method.to_string(),
+        confidence: confidence.to_string(),
+    }
 }
 
 /// Get cost summary for a period.

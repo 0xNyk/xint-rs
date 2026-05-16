@@ -75,6 +75,12 @@ impl Config {
         })
     }
 
+    /// Non-throwing variant. Returns None if missing; caller can print the
+    /// credit onboarding guide instead of erroring out.
+    pub fn try_xai_key(&self) -> Option<&str> {
+        self.xai_api_key.as_deref()
+    }
+
     pub fn require_xai_management_key(&self) -> Result<&str> {
         self.xai_management_api_key.as_deref().ok_or_else(|| {
             anyhow::anyhow!(

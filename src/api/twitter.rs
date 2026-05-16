@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 use std::collections::{HashMap, HashSet};
 
-use crate::client::{XClient, FIELDS};
+use crate::client::{XClient, EXTENDED_FIELDS, FIELDS};
 use crate::models::*;
 
 /// Parse raw API response into Tweet structs.
@@ -377,9 +377,11 @@ pub async fn search(
     Ok(all_tweets)
 }
 
-/// Get a single tweet by ID.
+/// Get a single tweet by ID. Single-tweet lookups always pay $0.005 per
+/// tweet regardless of field set, so we opt into EXTENDED_FIELDS to get
+/// article + note_tweet + Premium badge when present.
 pub async fn get_tweet(client: &XClient, token: &str, tweet_id: &str) -> Result<Option<Tweet>> {
-    let path = format!("tweets/{tweet_id}?{FIELDS}");
+    let path = format!("tweets/{tweet_id}?{EXTENDED_FIELDS}");
     let raw = client.bearer_get(&path, token).await?;
     let tweets = parse_tweets(&raw);
     Ok(tweets.into_iter().next())

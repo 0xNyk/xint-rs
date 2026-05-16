@@ -34,6 +34,47 @@ pub async fn run(args: &SearchArgs, config: &Config, client: &XClient) -> Result
         query.push_str(" -is:retweet");
     }
 
+    // Dry-run preview — print estimate and exit before any API call.
+    if args.dry_run {
+        let pages_est = args.pages.clamp(1, 5);
+        let per_page = if args.full { 500u64 } else { 100u64 };
+        let units = pages_est as u64 * per_page;
+        let op = if args.full { "search_archive" } else { "search" };
+        let endpoint = if args.full {
+            "/2/tweets/search/all"
+        } else {
+            "/2/tweets/search/recent"
+        };
+        let cost = crate::dryrun::estimate_cost(op, units, 1);
+        let notes: Vec<&str> = if args.full {
+            vec!["Full-archive search: 2x cost; requires --confirm to actually run."]
+        } else {
+            vec![]
+        };
+        crate::dryrun::preview_and_exit(&crate::dryrun::DryRunEstimate {
+            command: &format!("search \"{query}\""),
+            endpoint,
+            units,
+            unit_label: "tweets",
+            cost_usd: cost,
+            cache_predicted_hit: None,
+            cache_ttl_minutes: Some(if args.quick { 60 } else { 15 }),
+            notes: &notes,
+        });
+    }
+
+    // Archive search confirmation gate — full-archive is 2x cost and easy
+    // to invoke accidentally. Require explicit --confirm so users opt in
+    // knowing the price.
+    if args.full && !args.confirm {
+        let est_pages = args.pages.clamp(1, 5);
+        let est_cost = est_pages as f64 * 500.0 * 0.01;
+        eprintln!(
+            "\n⚠  Full-archive search is 2x the cost of recent search.\n   Estimated max cost: ~${est_cost:.2} ({est_pages} page(s) × 500 tweets × $0.01).\n   Re-run with --confirm to proceed, or drop --full to use recent search instead.\n"
+        );
+        std::process::exit(2);
+    }
+
     // Quick mode overrides
     let (pages, limit, min_likes, cache_ttl) = if args.quick {
         (1u32, args.limit.min(10), 5u64, 60 * 60 * 1000u64) // 1hr cache
