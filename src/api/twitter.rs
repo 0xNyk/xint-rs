@@ -272,6 +272,56 @@ pub fn parse_tweets(raw: &RawResponse) -> Vec<Tweet> {
         .collect()
 }
 
+fn value_string(value: &serde_json::Value, key: &str) -> Option<String> {
+    match value.get(key)? {
+        serde_json::Value::String(text) if !text.is_empty() => Some(text.to_string()),
+        serde_json::Value::Number(number) => Some(number.to_string()),
+        _ => None,
+    }
+}
+
+fn value_u64(value: &serde_json::Value, key: &str) -> u64 {
+    value.get(key).and_then(|field| field.as_u64()).unwrap_or(0)
+}
+
+fn parse_xquik_tweet(value: &serde_json::Value) -> Option<Tweet> {
+    let id = value_string(value, "id")?;
+    let text = value_string(value, "text").unwrap_or_default();
+    let author = value.get("author").unwrap_or(&serde_json::Value::Null);
+    let username = value_string(author, "userName")
+        .or_else(|| value_string(author, "username"))
+        .unwrap_or_else(|| "?".to_string());
+    let name = value_string(author, "name").unwrap_or_else(|| username.clone());
+    let author_id = value_string(author, "id").unwrap_or_else(|| "?".to_string());
+    let tweet_url = value_string(value, "url")
+        .unwrap_or_else(|| format!("https://x.com/{username}/status/{id}"));
+
+    Some(Tweet {
+        id,
+        text,
+        author_id,
+        username,
+        name,
+        created_at: value_string(value, "createdAt").unwrap_or_default(),
+        conversation_id: value_string(value, "conversationId").unwrap_or_default(),
+        metrics: TweetMetrics {
+            likes: value_u64(value, "likeCount"),
+            retweets: value_u64(value, "retweetCount"),
+            replies: value_u64(value, "replyCount"),
+            quotes: value_u64(value, "quoteCount"),
+            impressions: value_u64(value, "viewCount"),
+            bookmarks: value_u64(value, "bookmarkCount"),
+        },
+        urls: Vec::new(),
+        mentions: Vec::new(),
+        hashtags: Vec::new(),
+        tweet_url,
+        article: None,
+        organic_metrics: None,
+        non_public_metrics: None,
+    })
+}
+
 /// Parse a "since" value into an ISO 8601 timestamp.
 pub fn parse_since(since: &str) -> Option<String> {
     // Shorthand: "1h", "3h", "1d", "30m"
@@ -367,6 +417,88 @@ pub async fn search(
 
         next_token = raw.meta.and_then(|m| m.next_token);
         if next_token.is_none() {
+            break;
+        }
+        if page < pages - 1 {
+            crate::client::rate_delay().await;
+        }
+    }
+
+    Ok(all_tweets)
+}
+
+/// Search tweets through Xquik. This is opt-in via XINT_SEARCH_PROVIDER=xquik.
+pub async fn search_xquik(
+    api_key: &str,
+    query: &str,
+    pages: u32,
+    sort_order: &str,
+    since: Option<&str>,
+    until: Option<&str>,
+) -> Result<Vec<Tweet>> {
+    let http = reqwest::Client::new();
+    let query_type = if matches!(sort_order, "recent" | "recency") {
+        "Latest"
+    } else {
+        "Top"
+    };
+    let since_time = since.and_then(parse_since);
+    let until_time = until.and_then(parse_since);
+    let mut all_tweets = Vec::new();
+    let mut cursor: Option<String> = None;
+
+    for page in 0..pages.max(1) {
+        let mut url = url::Url::parse("https://xquik.com/api/v1/x/tweets/search")?;
+        {
+            let mut params = url.query_pairs_mut();
+            params.append_pair("q", query);
+            params.append_pair("queryType", query_type);
+            params.append_pair("limit", "200");
+            if let Some(value) = &since_time {
+                params.append_pair("sinceTime", value);
+            }
+            if let Some(value) = &until_time {
+                params.append_pair("untilTime", value);
+            }
+            if let Some(value) = &cursor {
+                params.append_pair("cursor", value);
+            }
+        }
+
+        let response = http
+            .get(url)
+            .header("x-api-key", api_key)
+            .header("accept", "application/json")
+            .send()
+            .await?;
+        let status = response.status();
+        let body = response.text().await?;
+        if !status.is_success() {
+            bail!("Xquik API {status}: {body}");
+        }
+
+        let payload: serde_json::Value = serde_json::from_str(&body)?;
+        let tweets = payload
+            .get("tweets")
+            .and_then(|tweets| tweets.as_array())
+            .map(|tweets| {
+                tweets
+                    .iter()
+                    .filter_map(parse_xquik_tweet)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        all_tweets.extend(tweets);
+
+        cursor = payload
+            .get("next_cursor")
+            .and_then(|value| value.as_str())
+            .map(str::to_string);
+        let has_next = payload
+            .get("has_next_page")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
+        if cursor.is_none() || !has_next {
             break;
         }
         if page < pages - 1 {

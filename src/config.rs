@@ -5,6 +5,8 @@ use std::path::PathBuf;
 pub struct Config {
     pub bearer_token: Option<String>,
     pub client_id: Option<String>,
+    pub xquik_api_key: Option<String>,
+    pub search_provider: Option<String>,
     pub xai_api_key: Option<String>,
     pub xai_management_api_key: Option<String>,
     pub data_dir: PathBuf,
@@ -42,6 +44,9 @@ impl Config {
 
         let bearer_token = non_empty_env("X_BEARER_TOKEN");
         let client_id = non_empty_env("X_CLIENT_ID");
+        let xquik_api_key = non_empty_env("XQUIK_API_KEY");
+        let search_provider =
+            non_empty_env("XINT_SEARCH_PROVIDER").map(|value| value.to_lowercase());
         let xai_api_key = non_empty_env("XAI_API_KEY");
         let xai_management_api_key = non_empty_env("XAI_MANAGEMENT_API_KEY");
 
@@ -51,9 +56,21 @@ impl Config {
         Ok(Self {
             bearer_token,
             client_id,
+            xquik_api_key,
+            search_provider,
             xai_api_key,
             xai_management_api_key,
             data_dir,
+        })
+    }
+
+    pub fn search_provider_is(&self, provider: &str) -> bool {
+        self.search_provider.as_deref() == Some(provider)
+    }
+
+    pub fn require_xquik_api_key(&self) -> Result<&str> {
+        self.xquik_api_key.as_deref().ok_or_else(|| {
+            anyhow::anyhow!("XQUIK_API_KEY not found. Set it when XINT_SEARCH_PROVIDER=xquik")
         })
     }
 

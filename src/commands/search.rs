@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use std::fs;
 
 use crate::api::twitter;
@@ -12,7 +12,16 @@ use crate::sentiment;
 
 pub async fn run(args: &SearchArgs, config: &Config, client: &XClient) -> Result<()> {
     let started_at = std::time::Instant::now();
-    let token = config.require_bearer_token()?;
+    let xquik_api_key = if config.search_provider_is("xquik") {
+        Some(config.require_xquik_api_key()?)
+    } else {
+        None
+    };
+    let token = if xquik_api_key.is_none() {
+        Some(config.require_bearer_token()?)
+    } else {
+        None
+    };
     let mut query = args.query.join(" ");
 
     if query.is_empty() {
@@ -39,7 +48,11 @@ pub async fn run(args: &SearchArgs, config: &Config, client: &XClient) -> Result
         let pages_est = args.pages.clamp(1, 5);
         let per_page = if args.full { 500u64 } else { 100u64 };
         let units = pages_est as u64 * per_page;
-        let op = if args.full { "search_archive" } else { "search" };
+        let op = if args.full {
+            "search_archive"
+        } else {
+            "search"
+        };
         let endpoint = if args.full {
             "/2/tweets/search/all"
         } else {
@@ -66,6 +79,9 @@ pub async fn run(args: &SearchArgs, config: &Config, client: &XClient) -> Result
     // Archive search confirmation gate — full-archive is 2x cost and easy
     // to invoke accidentally. Require explicit --confirm so users opt in
     // knowing the price.
+    if xquik_api_key.is_some() && args.full {
+        bail!("XINT_SEARCH_PROVIDER=xquik supports recent search only. Drop --full to continue.");
+    }
     if args.full && !args.confirm {
         let est_pages = args.pages.clamp(1, 5);
         let est_cost = est_pages as f64 * 500.0 * 0.01;
@@ -112,17 +128,29 @@ pub async fn run(args: &SearchArgs, config: &Config, client: &XClient) -> Result
         };
 
         let spinner = crate::spinner::Spinner::new(&format!("Searching \"{query}\"..."));
-        let tweets = twitter::search(
-            client,
-            token,
-            &query,
-            pages,
-            sort_order,
-            args.since.as_deref(),
-            args.until.as_deref(),
-            args.full,
-        )
-        .await;
+        let tweets = if let Some(api_key) = xquik_api_key {
+            twitter::search_xquik(
+                api_key,
+                &query,
+                pages,
+                sort_order,
+                args.since.as_deref(),
+                args.until.as_deref(),
+            )
+            .await
+        } else {
+            twitter::search(
+                client,
+                token.unwrap_or_default(),
+                &query,
+                pages,
+                sort_order,
+                args.since.as_deref(),
+                args.until.as_deref(),
+                args.full,
+            )
+            .await
+        };
         match &tweets {
             Ok(t) => spinner.done(&format!("Found {} tweets", t.len())),
             Err(_) => spinner.fail("Search failed"),
@@ -137,7 +165,11 @@ pub async fn run(args: &SearchArgs, config: &Config, client: &XClient) -> Result
             } else {
                 "search"
             },
-            "/2/tweets/search/recent",
+            if xquik_api_key.is_some() {
+                "/api/v1/x/tweets/search"
+            } else {
+                "/2/tweets/search/recent"
+            },
             tweets.len() as u64,
         );
 
@@ -186,7 +218,11 @@ pub async fn run(args: &SearchArgs, config: &Config, client: &XClient) -> Result
     let endpoint = if args.full {
         "/2/tweets/search/all"
     } else {
-        "/2/tweets/search/recent"
+        if xquik_api_key.is_some() {
+            "/api/v1/x/tweets/search"
+        } else {
+            "/2/tweets/search/recent"
+        }
     };
     let estimated_cost_usd = if cache_hit {
         0.0
@@ -196,7 +232,11 @@ pub async fn run(args: &SearchArgs, config: &Config, client: &XClient) -> Result
         tweets.len() as f64 * 0.005
     };
     let meta = output_meta::build_meta(
-        "x_api_v2",
+        if xquik_api_key.is_some() {
+            "xquik"
+        } else {
+            "x_api_v2"
+        },
         started_at,
         cache_hit,
         1.0,
