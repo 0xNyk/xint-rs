@@ -446,9 +446,7 @@ Contributions welcome. Read the [contribution guidelines](CONTRIBUTING.md) first
 
 ## ❤️ Support the Project
 
-If you find this project useful, consider supporting my open-source work.
-
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-orange?logo=buymeacoffee)](https://buymeacoffee.com/nyk_builderz)
+If xint helps your work, [sponsor its continued maintenance](https://github.com/sponsors/0xNyk). Follow [Nyk](https://nyk.dev) or [@nykdotdev](https://x.com/nykdotdev) for ongoing development.
 
 **Solana donations**
 
@@ -468,4 +466,3 @@ related or neighboring rights to this work.
     <img src="https://api.star-history.com/svg?repos=0xNyk/xint-rs&type=Date" alt="Star History" width="400">
   </a>
 </p>
-
