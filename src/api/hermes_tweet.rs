@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
-use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
+use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, RETRY_AFTER};
+use serde::Deserialize;
 use serde_json::Value;
 use std::time::Duration;
 
@@ -7,6 +8,7 @@ use crate::models::{Tweet, TweetMetrics};
 
 const DEFAULT_BASE_URL: &str = "https://xquik.com";
 const DEFAULT_TIMEOUT_SECONDS: u64 = 30;
+const MAX_ATTEMPTS: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TwitterBackend {
@@ -42,7 +44,7 @@ impl HermesTweetClient {
             .build()?;
         Ok(Self {
             http,
-            base_url: normalize_base_url(base_url),
+            base_url: normalize_base_url(base_url)?,
             api_key: key.to_string(),
         })
     }
@@ -50,34 +52,72 @@ impl HermesTweetClient {
     pub async fn search(&self, query: &str, limit: usize) -> Result<Vec<Tweet>> {
         let url = format!("{}/api/v1/x/tweets/search", self.base_url);
         let limit_param = limit.to_string();
-        let response = self
-            .http
-            .get(url)
-            .headers(auth_headers(&self.api_key)?)
-            .query(&[("q", query), ("limit", limit_param.as_str())])
-            .send()
-            .await?;
+        for attempt in 0..MAX_ATTEMPTS {
+            let response = self
+                .http
+                .get(&url)
+                .headers(auth_headers(&self.api_key)?)
+                .query(&[("q", query), ("limit", limit_param.as_str())])
+                .send()
+                .await;
+            let response = match response {
+                Ok(response) => response,
+                Err(_) if attempt + 1 < MAX_ATTEMPTS => {
+                    tokio::time::sleep(retry_delay(None, attempt)).await;
+                    continue;
+                }
+                Err(error) => return Err(error.into()),
+            };
+            let status = response.status();
+            if should_retry(status) && attempt + 1 < MAX_ATTEMPTS {
+                tokio::time::sleep(retry_delay(response.headers().get(RETRY_AFTER), attempt)).await;
+                continue;
+            }
 
-        let status = response.status();
-        let payload: Value = response.json().await?;
-        if !status.is_success() {
-            return Err(anyhow!(
-                "Hermes Tweet backend returned {}: {}",
-                status.as_u16(),
-                compact_json(&payload)
-            ));
+            let payload: Value = response.json().await?;
+            if !status.is_success() {
+                return Err(anyhow!(
+                    "Hermes Tweet backend returned {}: {}",
+                    status.as_u16(),
+                    compact_json(&payload)
+                ));
+            }
+            return parse_tweets(&payload);
         }
-
-        Ok(parse_tweets(&payload))
+        unreachable!("retry loop always returns on its final attempt")
     }
 }
 
-fn normalize_base_url(base_url: Option<&str>) -> String {
+fn should_retry(status: reqwest::StatusCode) -> bool {
+    matches!(status.as_u16(), 408 | 409 | 424 | 429) || status.is_server_error()
+}
+
+fn retry_delay(header: Option<&HeaderValue>, attempt: u32) -> Duration {
+    header
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(|seconds| Duration::from_secs(seconds.min(30)))
+        .unwrap_or_else(|| Duration::from_millis(250 * 2u64.pow(attempt)))
+}
+
+fn normalize_base_url(base_url: Option<&str>) -> Result<String> {
     let value = base_url.unwrap_or(DEFAULT_BASE_URL).trim();
     if value.is_empty() {
-        return DEFAULT_BASE_URL.to_string();
+        return Ok(DEFAULT_BASE_URL.to_string());
     }
-    value.trim_end_matches('/').to_string()
+    let parsed = reqwest::Url::parse(value)?;
+    let local = parsed.host_str().is_some_and(|host| {
+        host.eq_ignore_ascii_case("localhost")
+            || host
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|ip| ip.is_loopback())
+    });
+    if parsed.scheme() != "https" && !(parsed.scheme() == "http" && local) {
+        return Err(anyhow!(
+            "Hermes Tweet API base must use HTTPS; HTTP is allowed only for loopback testing"
+        ));
+    }
+    Ok(value.trim_end_matches('/').to_string())
 }
 
 fn auth_headers(api_key: &str) -> Result<HeaderMap> {
@@ -99,137 +139,86 @@ fn compact_json(value: &Value) -> String {
         .collect()
 }
 
-pub fn parse_tweets(payload: &Value) -> Vec<Tweet> {
-    collect_tweet_candidates(payload)
-        .into_iter()
-        .filter_map(normalize_tweet)
-        .collect()
+#[derive(Deserialize)]
+struct SearchResponse {
+    tweets: Vec<SearchTweet>,
 }
 
-fn collect_tweet_candidates(payload: &Value) -> Vec<&Value> {
-    if let Some(items) = payload.as_array() {
-        return items.iter().collect();
-    }
-    let Some(object) = payload.as_object() else {
-        return Vec::new();
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SearchTweet {
+    id: String,
+    #[serde(default)]
+    text: String,
+    #[serde(default, alias = "created_at")]
+    created_at: String,
+    #[serde(default, alias = "conversation_id")]
+    conversation_id: String,
+    #[serde(default, alias = "tweetUrl", alias = "tweet_url")]
+    url: String,
+    #[serde(default, alias = "like_count", alias = "likes")]
+    like_count: u64,
+    #[serde(default, alias = "retweet_count", alias = "retweets")]
+    retweet_count: u64,
+    #[serde(default, alias = "reply_count", alias = "replies")]
+    reply_count: u64,
+    #[serde(default, alias = "quote_count", alias = "quotes")]
+    quote_count: u64,
+    #[serde(default, alias = "view_count", alias = "impressions")]
+    view_count: u64,
+    #[serde(default, alias = "bookmark_count", alias = "bookmarks")]
+    bookmark_count: u64,
+    author: Option<SearchAuthor>,
+}
+
+#[derive(Deserialize)]
+struct SearchAuthor {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    username: String,
+    #[serde(default)]
+    name: String,
+}
+
+fn parse_tweets(payload: &Value) -> Result<Vec<Tweet>> {
+    let response: SearchResponse = serde_json::from_value(payload.clone())?;
+    Ok(response.tweets.into_iter().map(normalize_tweet).collect())
+}
+
+fn normalize_tweet(tweet: SearchTweet) -> Tweet {
+    let author = tweet.author.unwrap_or(SearchAuthor {
+        id: String::new(),
+        username: "?".to_string(),
+        name: String::new(),
+    });
+    let username = author.username.trim_start_matches('@').to_string();
+    let name = if author.name.is_empty() {
+        username.clone()
+    } else {
+        author.name
+    };
+    let tweet_url = if tweet.url.is_empty() && username != "?" {
+        format!("https://x.com/{username}/status/{}", tweet.id)
+    } else {
+        tweet.url
     };
 
-    for key in ["tweets", "data", "results", "items", "statuses"] {
-        if let Some(value) = object.get(key) {
-            let nested = collect_tweet_candidates(value);
-            if !nested.is_empty() {
-                return nested;
-            }
-        }
-    }
-
-    for value in object.values() {
-        let nested = collect_tweet_candidates(value);
-        if !nested.is_empty() {
-            return nested;
-        }
-    }
-    Vec::new()
-}
-
-fn normalize_tweet(item: &Value) -> Option<Tweet> {
-    let id = first_string(
-        item,
-        &[
-            Path::Key("tweet_id"),
-            Path::Key("id"),
-            Path::Key("id_str"),
-            Path::Key("rest_id"),
-            Path::Key("conversation_id"),
-        ],
-    )?;
-    let text = first_string(
-        item,
-        &[
-            Path::Key("source_full_text"),
-            Path::Key("full_text"),
-            Path::Key("text"),
-            Path::Key("content"),
-            Path::Key("body"),
-        ],
-    )
-    .unwrap_or_default();
-    let username = first_string(
-        item,
-        &[
-            Path::Key("handle"),
-            Path::Key("username"),
-            Path::Key("screen_name"),
-            Path::Nested(&["author", "username"]),
-            Path::Nested(&["author", "screen_name"]),
-            Path::Nested(&["user", "username"]),
-            Path::Nested(&["user", "screen_name"]),
-        ],
-    )
-    .unwrap_or_else(|| "?".to_string())
-    .trim_start_matches('@')
-    .to_string();
-    let name = first_string(
-        item,
-        &[
-            Path::Key("name"),
-            Path::Nested(&["author", "name"]),
-            Path::Nested(&["user", "name"]),
-        ],
-    )
-    .unwrap_or_else(|| username.clone());
-    let author_id = first_string(
-        item,
-        &[
-            Path::Key("author_id"),
-            Path::Nested(&["author", "id"]),
-            Path::Nested(&["user", "id"]),
-        ],
-    )
-    .unwrap_or_default();
-    let created_at = first_string(
-        item,
-        &[
-            Path::Key("created_at"),
-            Path::Key("createdAt"),
-            Path::Key("timestamp"),
-            Path::Key("time"),
-        ],
-    )
-    .unwrap_or_default();
-    let conversation_id = first_string(item, &[Path::Key("conversation_id")]).unwrap_or_default();
-    let tweet_url = first_string(
-        item,
-        &[
-            Path::Key("tweet_url"),
-            Path::Key("status_url"),
-            Path::Key("url"),
-            Path::Key("link"),
-        ],
-    )
-    .unwrap_or_else(|| {
-        if username == "?" {
-            String::new()
-        } else {
-            format!("https://x.com/{username}/status/{id}")
-        }
-    });
-
-    Some(Tweet {
-        id,
-        text,
-        author_id,
+    Tweet {
+        id: tweet.id,
+        text: tweet.text,
+        author_id: author.id,
         username,
         name,
-        created_at,
-        conversation_id,
+        created_at: tweet.created_at,
+        conversation_id: tweet.conversation_id,
         metrics: TweetMetrics {
-            likes: metric_value(item, &["likes", "like_count"]),
-            retweets: metric_value(item, &["retweets", "retweet_count", "reposts"]),
-            replies: metric_value(item, &["replies", "reply_count"]),
-            quotes: metric_value(item, &["quotes", "quote_count"]),
-            impressions: metric_value(item, &["impressions", "impression_count", "views"]),
-            bookmarks: metric_value(item, &["bookmarks", "bookmark_count"]),
+            likes: tweet.like_count,
+            retweets: tweet.retweet_count,
+            replies: tweet.reply_count,
+            quotes: tweet.quote_count,
+            impressions: tweet.view_count,
+            bookmarks: tweet.bookmark_count,
         },
         urls: Vec::new(),
         mentions: Vec::new(),
@@ -238,68 +227,7 @@ fn normalize_tweet(item: &Value) -> Option<Tweet> {
         article: None,
         organic_metrics: None,
         non_public_metrics: None,
-    })
-}
-
-enum Path<'a> {
-    Key(&'a str),
-    Nested(&'a [&'a str]),
-}
-
-fn first_string(value: &Value, paths: &[Path<'_>]) -> Option<String> {
-    for path in paths {
-        let current = match path {
-            Path::Key(key) => value.get(key),
-            Path::Nested(keys) => nested_value(value, keys),
-        };
-        if let Some(text) = current.and_then(value_to_string) {
-            if !text.is_empty() {
-                return Some(text);
-            }
-        }
     }
-    None
-}
-
-fn nested_value<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a Value> {
-    let mut current = value;
-    for key in keys {
-        current = current.get(*key)?;
-    }
-    Some(current)
-}
-
-fn value_to_string(value: &Value) -> Option<String> {
-    if let Some(text) = value.as_str() {
-        return Some(text.trim().to_string());
-    }
-    if let Some(number) = value.as_u64() {
-        return Some(number.to_string());
-    }
-    None
-}
-
-fn metric_value(item: &Value, keys: &[&str]) -> u64 {
-    for key in keys {
-        if let Some(value) = item.get(key).and_then(Value::as_u64) {
-            return value;
-        }
-        if let Some(value) = item
-            .get("metrics")
-            .and_then(|metrics| metrics.get(*key))
-            .and_then(Value::as_u64)
-        {
-            return value;
-        }
-        if let Some(value) = item
-            .get("public_metrics")
-            .and_then(|metrics| metrics.get(*key))
-            .and_then(Value::as_u64)
-        {
-            return value;
-        }
-    }
-    0
 }
 
 #[cfg(test)]
@@ -307,29 +235,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_nested_search_results() {
+    fn parses_documented_search_response() {
         let payload = serde_json::json!({
-            "data": {
-                "tweets": [
-                    {
-                        "id": "123",
-                        "text": "Hermes Agent search result",
-                        "author": {"username": "alice", "name": "Alice"},
-                        "created_at": "2026-05-23T12:00:00Z",
-                        "metrics": {"likes": 9, "retweets": 2}
-                    }
-                ]
-            }
+            "tweets": [{
+                "id": "123",
+                "text": "Hermes Agent search result",
+                "author": {"id": "42", "username": "alice", "name": "Alice"},
+                "createdAt": "2026-05-23T12:00:00Z",
+                "conversationId": "120",
+                "likeCount": 9,
+                "retweetCount": 2,
+                "replyCount": 3,
+                "quoteCount": 4,
+                "viewCount": 50,
+                "bookmarkCount": 6
+            }],
+            "has_next_page": false,
+            "next_cursor": ""
         });
 
-        let tweets = parse_tweets(&payload);
+        let tweets = parse_tweets(&payload).unwrap();
 
         assert_eq!(tweets.len(), 1);
         assert_eq!(tweets[0].id, "123");
+        assert_eq!(tweets[0].author_id, "42");
         assert_eq!(tweets[0].username, "alice");
         assert_eq!(tweets[0].tweet_url, "https://x.com/alice/status/123");
         assert_eq!(tweets[0].metrics.likes, 9);
         assert_eq!(tweets[0].metrics.retweets, 2);
+        assert_eq!(tweets[0].metrics.replies, 3);
+        assert_eq!(tweets[0].metrics.quotes, 4);
+        assert_eq!(tweets[0].metrics.impressions, 50);
+        assert_eq!(tweets[0].metrics.bookmarks, 6);
     }
 
     #[test]
@@ -346,5 +283,26 @@ mod tests {
             TwitterBackend::from_env_value("x-api-v2"),
             TwitterBackend::XApiV2
         );
+    }
+
+    #[test]
+    fn rejects_insecure_remote_api_base() {
+        assert!(normalize_base_url(Some("http://example.com")).is_err());
+        assert_eq!(
+            normalize_base_url(Some("http://127.0.0.1:8080/")).unwrap(),
+            "http://127.0.0.1:8080"
+        );
+    }
+
+    #[test]
+    fn retries_transient_statuses_and_caps_server_delay() {
+        assert!(should_retry(reqwest::StatusCode::TOO_MANY_REQUESTS));
+        assert!(should_retry(reqwest::StatusCode::SERVICE_UNAVAILABLE));
+        assert!(!should_retry(reqwest::StatusCode::UNAUTHORIZED));
+        assert_eq!(
+            retry_delay(Some(&HeaderValue::from_static("120")), 0),
+            Duration::from_secs(30)
+        );
+        assert_eq!(retry_delay(None, 2), Duration::from_secs(1));
     }
 }

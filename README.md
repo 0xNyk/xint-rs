@@ -209,6 +209,12 @@ XINT_TWITTER_BACKEND=hermes-tweet XQUIK_API_KEY=xq_your_key \
   xint search "Hermes Agent skill" --json
 ```
 
+This backend is disabled by default. Selecting it sends the search query,
+result limit, API key, and normal HTTPS request metadata to `xquik.com`.
+Xquik processes requests under its [privacy policy](https://xquik.com/en/privacy),
+including the documented API-record retention period. Only opt in if you accept
+that third-party processing. The API key is sent only in the `x-api-key` header.
+
 ### Options
 
 | Flag | Description |
@@ -466,13 +472,11 @@ Contributions welcome. Read the [contribution guidelines](CONTRIBUTING.md) first
 
 ## ❤️ Support the Project
 
-If you find this project useful, consider supporting my open-source work.
-
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-orange?logo=buymeacoffee)](https://buymeacoffee.com/nyk_builderz)
+If xint helps your work, [sponsor its continued maintenance](https://github.com/sponsors/0xNyk). Follow [Nyk](https://nyk.dev) or [@nykdotdev](https://x.com/nykdotdev) for ongoing development.
 
 **Solana donations**
 
-`BYLu8XD8hGDUtdRBWpGWu5HKoiPrWqCxYFSh4oxXuvPg`
+`2k1oq9U99mwy4gm8P2hXPJoZusoXQCpFs35EEf5Ve73y`
 
 ## License
 
