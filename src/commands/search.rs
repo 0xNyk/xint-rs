@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::fs;
 
+use crate::api::hermes_tweet::{HermesTweetClient, TwitterBackend};
 use crate::api::twitter;
 use crate::cli::SearchArgs;
 use crate::client::XClient;
@@ -10,9 +11,20 @@ use crate::format;
 use crate::output_meta;
 use crate::sentiment;
 
+fn export_slug(query: &str) -> String {
+    query
+        .chars()
+        .filter(|character| character.is_alphanumeric() || *character == ' ')
+        .collect::<String>()
+        .replace(' ', "-")
+        .to_lowercase()
+        .chars()
+        .take(40)
+        .collect()
+}
+
 pub async fn run(args: &SearchArgs, config: &Config, client: &XClient) -> Result<()> {
     let started_at = std::time::Instant::now();
-    let token = config.require_bearer_token()?;
     let mut query = args.query.join(" ");
 
     if query.is_empty() {
@@ -32,6 +44,10 @@ pub async fn run(args: &SearchArgs, config: &Config, client: &XClient) -> Result
     }
     if args.no_retweets {
         query.push_str(" -is:retweet");
+    }
+
+    if config.twitter_backend() == TwitterBackend::HermesTweet {
+        return run_hermes_tweet_search(args, config, &query, started_at).await;
     }
 
     // Dry-run preview — print estimate and exit before any API call.
@@ -62,6 +78,8 @@ pub async fn run(args: &SearchArgs, config: &Config, client: &XClient) -> Result
             notes: &notes,
         });
     }
+
+    let token = config.require_bearer_token()?;
 
     // Archive search confirmation gate — full-archive is 2x cost and easy
     // to invoke accidentally. Require explicit --confirm so users opt in
@@ -226,13 +244,7 @@ pub async fn run(args: &SearchArgs, config: &Config, client: &XClient) -> Result
         let exports_dir = config.exports_dir();
         fs::create_dir_all(&exports_dir)?;
         let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
-        let slug = query
-            .chars()
-            .filter(|c| c.is_alphanumeric() || *c == ' ')
-            .collect::<String>()
-            .replace(' ', "-")
-            .to_lowercase();
-        let slug = &slug[..slug.len().min(40)];
+        let slug = export_slug(&query);
         let path = exports_dir.join(format!("search-{slug}-{date}.md"));
         let md = format::format_research_markdown(&query, &tweets, &[&query]);
         fs::write(&path, &md)?;
@@ -240,4 +252,135 @@ pub async fn run(args: &SearchArgs, config: &Config, client: &XClient) -> Result
     }
 
     Ok(())
+}
+
+async fn run_hermes_tweet_search(
+    args: &SearchArgs,
+    config: &Config,
+    query: &str,
+    started_at: std::time::Instant,
+) -> Result<()> {
+    if args.full {
+        anyhow::bail!("Hermes Tweet backend supports recent public search only; remove --full");
+    }
+    let limit = if args.quick {
+        args.limit.min(10)
+    } else {
+        args.limit
+    };
+    let fetch_limit = limit.clamp(1, 100);
+
+    if args.dry_run {
+        crate::dryrun::preview_and_exit(&crate::dryrun::DryRunEstimate {
+            command: &format!("search \"{query}\""),
+            endpoint: "/api/v1/x/tweets/search",
+            units: fetch_limit as u64,
+            unit_label: "tweets",
+            cost_usd: 0.0,
+            cache_predicted_hit: None,
+            cache_ttl_minutes: None,
+            notes: &["Hermes Tweet/Xquik is an optional read-only search backend."],
+        });
+    }
+
+    let api_key = config.require_hermes_tweet_key()?;
+    let backend = HermesTweetClient::new(config.hermes_tweet_api_base.as_deref(), api_key)?;
+
+    let spinner =
+        crate::spinner::Spinner::new(&format!("Searching \"{query}\" with Hermes Tweet..."));
+    let tweets = backend.search(query, fetch_limit).await;
+    match &tweets {
+        Ok(t) => spinner.done(&format!("Found {} tweets", t.len())),
+        Err(_) => spinner.fail("Hermes Tweet search failed"),
+    }
+    let mut tweets = tweets?;
+    tweets = twitter::dedupe(tweets);
+    tweets = twitter::filter_engagement(tweets, args.min_likes, args.min_impressions);
+    match args.sort.as_str() {
+        "recent" | "recency" => {}
+        other => twitter::sort_by(&mut tweets, other),
+    }
+
+    if args.sentiment {
+        if let Ok(api_key) = config.require_xai_key() {
+            let http = reqwest::Client::new();
+            eprintln!("Running sentiment analysis...");
+            match sentiment::analyze_sentiment(
+                &http,
+                api_key,
+                &tweets,
+                None,
+                Some(&config.costs_path()),
+            )
+            .await
+            {
+                Ok(sentiments) => {
+                    let stats = sentiment::compute_stats(&sentiments);
+                    eprint!("{}", sentiment::format_stats(&stats, tweets.len()));
+                }
+                Err(e) => eprintln!("[sentiment] Failed: {e}"),
+            }
+        } else {
+            eprintln!("[sentiment] XAI_API_KEY not set, skipping sentiment analysis");
+        }
+    }
+
+    let shown: Vec<_> = tweets.iter().take(limit).cloned().collect();
+    let meta = output_meta::build_meta(
+        "hermes_tweet",
+        started_at,
+        false,
+        1.0,
+        "/api/v1/x/tweets/search",
+        0.0,
+        &config.costs_path(),
+    );
+
+    if args.json {
+        output_meta::print_json_with_meta(&meta, &shown)?;
+    } else if args.jsonl {
+        output_meta::print_jsonl_with_meta(&meta, "tweet", &shown)?;
+    } else if args.csv {
+        let output = format::format_csv(&tweets[..tweets.len().min(limit)]);
+        println!("{output}");
+    } else if args.markdown {
+        let output =
+            format::format_research_markdown(query, &tweets[..tweets.len().min(limit)], &[query]);
+        println!("{output}");
+    } else {
+        let output = format::format_results_terminal(&tweets, Some(query), limit);
+        println!("{output}");
+    }
+
+    if args.save {
+        let exports_dir = config.exports_dir();
+        fs::create_dir_all(&exports_dir)?;
+        let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        let slug = export_slug(query);
+        let path = exports_dir.join(format!("search-{slug}-{date}.md"));
+        let md = format::format_research_markdown(query, &tweets, &[query]);
+        fs::write(&path, &md)?;
+        eprintln!("\nSaved to {}", path.display());
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::export_slug;
+
+    #[test]
+    fn export_slug_normalizes_spaces_and_case() {
+        assert_eq!(export_slug("X Search Results"), "x-search-results");
+    }
+
+    #[test]
+    fn export_slug_truncates_at_a_unicode_character_boundary() {
+        let query = format!("{}éclair", "a".repeat(39));
+        let slug = export_slug(&query);
+
+        assert_eq!(slug.chars().count(), 40);
+        assert!(slug.ends_with('é'));
+    }
 }

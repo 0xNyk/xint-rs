@@ -5,6 +5,9 @@ use std::path::PathBuf;
 pub struct Config {
     pub bearer_token: Option<String>,
     pub client_id: Option<String>,
+    pub twitter_backend: Option<String>,
+    pub hermes_tweet_api_key: Option<String>,
+    pub hermes_tweet_api_base: Option<String>,
     pub xai_api_key: Option<String>,
     pub xai_management_api_key: Option<String>,
     pub data_dir: PathBuf,
@@ -42,6 +45,11 @@ impl Config {
 
         let bearer_token = non_empty_env("X_BEARER_TOKEN");
         let client_id = non_empty_env("X_CLIENT_ID");
+        let twitter_backend = non_empty_env("XINT_TWITTER_BACKEND");
+        let hermes_tweet_api_key =
+            non_empty_env("HERMES_TWEET_API_KEY").or_else(|| non_empty_env("XQUIK_API_KEY"));
+        let hermes_tweet_api_base =
+            non_empty_env("HERMES_TWEET_API_BASE").or_else(|| non_empty_env("XQUIK_BASE_URL"));
         let xai_api_key = non_empty_env("XAI_API_KEY");
         let xai_management_api_key = non_empty_env("XAI_MANAGEMENT_API_KEY");
 
@@ -51,6 +59,9 @@ impl Config {
         Ok(Self {
             bearer_token,
             client_id,
+            twitter_backend,
+            hermes_tweet_api_key,
+            hermes_tweet_api_base,
             xai_api_key,
             xai_management_api_key,
             data_dir,
@@ -60,6 +71,18 @@ impl Config {
     pub fn require_bearer_token(&self) -> Result<&str> {
         self.bearer_token.as_deref().ok_or_else(|| {
             anyhow::anyhow!("X_BEARER_TOKEN not found. Set it in your environment or in .env")
+        })
+    }
+
+    pub fn twitter_backend(&self) -> crate::api::hermes_tweet::TwitterBackend {
+        crate::api::hermes_tweet::TwitterBackend::from_env_value(
+            self.twitter_backend.as_deref().unwrap_or("x_api_v2"),
+        )
+    }
+
+    pub fn require_hermes_tweet_key(&self) -> Result<&str> {
+        self.hermes_tweet_api_key.as_deref().ok_or_else(|| {
+            anyhow::anyhow!("HERMES_TWEET_API_KEY or XQUIK_API_KEY not found. Set one in your environment or in .env")
         })
     }
 

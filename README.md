@@ -122,6 +122,19 @@ cp .env.example .env
 # Add X_BEARER_TOKEN=your_token
 ```
 
+### Optional: Hermes Tweet Search Backend
+
+`xint search` can use Hermes Tweet/Xquik as a read-only public search backend:
+
+```bash
+XINT_TWITTER_BACKEND=hermes-tweet
+HERMES_TWEET_API_KEY=your_key
+# or XQUIK_API_KEY=your_key
+HERMES_TWEET_API_BASE=https://xquik.com
+```
+
+X API v2 remains the default when `XINT_TWITTER_BACKEND` is unset.
+
 ### Optional: xAI
 
 For `analyze`, `report --sentiment`, `article --ai`:
@@ -190,7 +203,17 @@ xint search "solana" --sentiment
 # Export
 xint search "startups" --csv > data.csv
 xint search "AI" --jsonl | jq '.text'
+
+# Optional Hermes Tweet/Xquik read backend
+XINT_TWITTER_BACKEND=hermes-tweet XQUIK_API_KEY=xq_your_key \
+  xint search "Hermes Agent skill" --json
 ```
+
+This backend is disabled by default. Selecting it sends the search query,
+result limit, API key, and normal HTTPS request metadata to `xquik.com`.
+Xquik processes requests under its [privacy policy](https://xquik.com/en/privacy),
+including the documented API-record retention period. Only opt in if you accept
+that third-party processing. The API key is sent only in the `x-api-key` header.
 
 ### Options
 
@@ -374,6 +397,9 @@ xint costs budget 2  # Set $2/day limit
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `X_BEARER_TOKEN` | Yes | X API v2 bearer |
+| `XINT_TWITTER_BACKEND` | No | Set `hermes-tweet` to use Hermes Tweet/Xquik for `xint search` |
+| `HERMES_TWEET_API_KEY` | No | Hermes Tweet/Xquik API key for the optional search backend |
+| `HERMES_TWEET_API_BASE` | No | Hermes Tweet/Xquik API base URL, defaults to `https://xquik.com` |
 | `XAI_API_KEY` | No | xAI for analyze/report |
 | `XINT_ARTICLE_TIMEOUT_SEC` | No | Article fetch timeout seconds (default 30, range 5-120) |
 | `X_CLIENT_ID` | No | OAuth for write ops |

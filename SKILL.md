@@ -17,6 +17,9 @@ credentials:
   - name: XAI_MANAGEMENT_API_KEY
     description: xAI Management API key for collections management
     required: false
+  - name: HERMES_TWEET_API_KEY
+    description: Hermes Tweet/Xquik API key for the optional search backend
+    required: false
   - name: X_CLIENT_ID
     description: X OAuth 2.0 client ID for user-context operations (bookmarks, likes, following, diff)
     required: false
@@ -34,6 +37,7 @@ security:
     - https://api.x.com
     - https://x.com
     - https://api.x.ai
+    - https://xquik.com
 ---
 
 # xint — X Intelligence CLI (Rust)
@@ -47,6 +51,7 @@ This skill requires sensitive credentials. Follow these guidelines:
 ### Credentials
 - **X_BEARER_TOKEN**: Required for X API. Treat as a secret - only set in environment or `.env` file
 - **XAI_API_KEY**: Optional, needed for AI analysis. Also a secret
+- **HERMES_TWEET_API_KEY**: Optional, needed only when `XINT_TWITTER_BACKEND=hermes-tweet`
 - **X_CLIENT_ID**: Optional, needed for OAuth. Less sensitive but don't expose publicly
 - **XAI_MANAGEMENT_API_KEY**: Optional, for collections management
 
@@ -82,6 +87,7 @@ Requires env vars (in `.env` or exported):
 - `X_CLIENT_ID` — for OAuth commands (bookmarks, likes, following, diff)
 - `XAI_API_KEY` — for AI analysis (analyze, report, x-search, collections upload/search)
 - `XAI_MANAGEMENT_API_KEY` — for collections management (list, create, ensure, add-document)
+- Optional search backend: set `XINT_TWITTER_BACKEND=hermes-tweet` with `HERMES_TWEET_API_KEY` or `XQUIK_API_KEY`
 
 OAuth setup (one-time): `xint auth setup`
 
@@ -99,6 +105,7 @@ xint search "AI agents" --jsonl               # One JSON per line
 xint search "AI agents" --csv                 # CSV output
 xint search "AI agents" --sentiment           # AI sentiment analysis (needs XAI_API_KEY)
 xint search "AI agents" --save                # Save to data/exports/
+XINT_TWITTER_BACKEND=hermes-tweet XQUIK_API_KEY=xq_your_key xint search "Hermes Agent skill" --json
 ```
 
 ### Monitoring
