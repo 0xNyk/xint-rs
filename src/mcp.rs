@@ -1013,10 +1013,15 @@ impl MCPServer {
                 .require_client_id()
                 .map_err(|e| e.to_string())?
                 .to_string();
-            let (token, _) =
-                oauth::get_valid_token(&client, &runtime_config.tokens_path(), &client_id)
-                    .await
-                    .map_err(|e| e.to_string())?;
+            let client_secret = runtime_config.client_secret.as_deref();
+            let (token, _) = oauth::get_valid_token(
+                &client,
+                &runtime_config.tokens_path(),
+                &client_id,
+                client_secret,
+            )
+            .await
+            .map_err(|e| e.to_string())?;
             Ok((client, token))
         }
 

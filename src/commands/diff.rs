@@ -114,8 +114,9 @@ pub async fn run(args: &DiffArgs, config: &Config, client: &XClient) -> Result<(
     if !cache_hit {
         // Get OAuth token
         let client_id = config.require_client_id()?;
+        let client_secret = config.client_secret.as_deref();
         let (access_token, _tokens) =
-            oauth::get_valid_token(client, &config.tokens_path(), client_id).await?;
+            oauth::get_valid_token(client, &config.tokens_path(), client_id, client_secret).await?;
 
         if args.fresh {
             eprintln!("Fetching {snap_type} for @{username} (--fresh, bypassing cache)...");

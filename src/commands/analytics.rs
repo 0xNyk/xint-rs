@@ -14,8 +14,9 @@ use crate::models::Tweet;
 
 pub async fn run(args: &AnalyticsArgs, config: &Config, client: &XClient) -> Result<()> {
     let client_id = config.require_client_id()?;
+    let client_secret = config.client_secret.as_deref();
     let (access_token, tokens) =
-        oauth::get_valid_token(client, &config.tokens_path(), client_id).await?;
+        oauth::get_valid_token(client, &config.tokens_path(), client_id, client_secret).await?;
 
     eprintln!("Fetching your tweets (since {})...", args.since);
 

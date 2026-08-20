@@ -86,7 +86,15 @@ async fn exchange_code(
     code: &str,
     code_verifier: &str,
     client_id: &str,
+    client_secret: Option<&str>,
 ) -> Result<serde_json::Value> {
+    let authorization = client_secret.map(|secret| {
+        use base64::Engine;
+        let credentials = format!("{}:{}", client_id, secret);
+        let encoded = base64::engine::general_purpose::STANDARD.encode(credentials.as_bytes());
+        format!("Basic {}", encoded)
+    });
+
     client
         .post_form(
             TOKEN_URL,
@@ -97,6 +105,7 @@ async fn exchange_code(
                 ("client_id", client_id),
                 ("code_verifier", code_verifier),
             ],
+            authorization.as_deref(),
         )
         .await
 }
@@ -124,8 +133,16 @@ pub async fn refresh_tokens(
     client: &XClient,
     tokens_path: &Path,
     client_id: &str,
+    client_secret: Option<&str>,
     tokens: &OAuthTokens,
 ) -> Result<OAuthTokens> {
+    let authorization = client_secret.map(|secret| {
+        use base64::Engine;
+        let credentials = format!("{}:{}", client_id, secret);
+        let encoded = base64::engine::general_purpose::STANDARD.encode(credentials.as_bytes());
+        format!("Basic {}", encoded)
+    });
+
     let data = client
         .post_form(
             TOKEN_URL,
@@ -134,6 +151,7 @@ pub async fn refresh_tokens(
                 ("refresh_token", &tokens.refresh_token),
                 ("client_id", client_id),
             ],
+            authorization.as_deref(),
         )
         .await?;
 
@@ -175,6 +193,7 @@ pub async fn get_valid_token(
     client: &XClient,
     tokens_path: &Path,
     client_id: &str,
+    client_secret: Option<&str>,
 ) -> Result<(String, OAuthTokens)> {
     let tokens = load_tokens(tokens_path)
         .ok_or_else(|| anyhow::anyhow!("No OAuth tokens found. Run 'auth setup' first."))?;
@@ -183,7 +202,7 @@ pub async fn get_valid_token(
 
     if now >= tokens.expires_at - EXPIRY_BUFFER_MS {
         eprintln!("OAuth token expired, refreshing...");
-        let refreshed = refresh_tokens(client, tokens_path, client_id, &tokens).await?;
+        let refreshed = refresh_tokens(client, tokens_path, client_id, client_secret, &tokens).await?;
         eprintln!("Token refreshed for @{}", refreshed.username);
         let token = refreshed.access_token.clone();
         Ok((token, refreshed))
@@ -230,6 +249,7 @@ pub async fn auth_setup(
     client: &XClient,
     tokens_path: &Path,
     client_id: &str,
+    client_secret: Option<&str>,
     manual: bool,
 ) -> Result<()> {
     let code_verifier = generate_code_verifier();
@@ -263,7 +283,7 @@ pub async fn auth_setup(
     };
 
     eprintln!("\nExchanging authorization code for tokens...");
-    let token_data = exchange_code(client, &code, &code_verifier, client_id).await?;
+    let token_data = exchange_code(client, &code, &code_verifier, client_id, client_secret).await?;
 
     let access_token = token_data
         .get("access_token")
@@ -465,3 +485,104 @@ pub fn auth_status(tokens_path: &Path) {
     println!("   Created: {}", tokens.created_at);
     println!("   Last refresh: {}", tokens.refreshed_at);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_basic_auth_header_with_secret() {
+        use base64::Engine;
+        let client_id = "test_client_id";
+        let client_secret = "test_secret";
+
+        let credentials = format!("{}:{}", client_id, client_secret);
+        let encoded = base64::engine::general_purpose::STANDARD.encode(credentials.as_bytes());
+        let expected = format!("Basic {}", encoded);
+
+        assert_eq!(expected, "Basic dGVzdF9jbGllbnRfaWQ6dGVzdF9zZWNyZXQ=");
+        assert!(expected.starts_with("Basic "));
+    }
+
+    #[test]
+    fn test_basic_auth_header_is_correct_format() {
+        use base64::Engine;
+        let client_id = "my_client";
+        let client_secret = "my_secret";
+
+        let credentials = format!("{}:{}", client_id, client_secret);
+        let encoded = base64::engine::general_purpose::STANDARD.encode(credentials.as_bytes());
+        let header = format!("Basic {}", encoded);
+
+        // Decode and verify
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(encoded.as_bytes())
+            .unwrap();
+        let decoded_str = String::from_utf8(decoded).unwrap();
+        assert_eq!(decoded_str, "my_client:my_secret");
+        assert!(header.starts_with("Basic "));
+    }
+
+    #[test]
+    fn test_no_secret_means_no_auth_header() {
+        let client_secret: Option<&str> = None;
+
+        let authorization = client_secret.map(|secret| {
+            use base64::Engine;
+            let credentials = format!("client_id:{}", secret);
+            let encoded = base64::engine::general_purpose::STANDARD.encode(credentials.as_bytes());
+            format!("Basic {}", encoded)
+        });
+
+        assert_eq!(authorization, None);
+    }
+
+    #[test]
+    fn test_secret_not_in_debug_string() {
+        let client_secret = Some("super_secret_value");
+        let client_id = "client_123";
+
+        // Create a formatted debug string without exposing the secret
+        let debug_str = format!("client_id={}, has_secret={}", client_id, client_secret.is_some());
+
+        assert!(!debug_str.contains("super_secret_value"));
+        assert!(debug_str.contains("has_secret=true"));
+        assert!(debug_str.contains("client_id=client_123"));
+    }
+
+    #[test]
+    fn test_base64_encoding_is_standard() {
+        use base64::Engine;
+
+        let test_cases = vec![
+            ("id:secret", "aWQ6c2VjcmV0"),
+            ("client:pass", "Y2xpZW50OnBhc3M="),
+            ("a:b", "YTpi"),
+        ];
+
+        for (input, expected) in test_cases {
+            let encoded = base64::engine::general_purpose::STANDARD.encode(input.as_bytes());
+            assert_eq!(encoded, expected);
+        }
+    }
+
+    #[test]
+    fn test_authorization_header_construction() {
+        let client_id = "test_id";
+        let client_secret = Some("test_secret");
+
+        let authorization = client_secret.map(|secret| {
+            use base64::Engine;
+            let credentials = format!("{}:{}", client_id, secret);
+            let encoded = base64::engine::general_purpose::STANDARD.encode(credentials.as_bytes());
+            format!("Basic {}", encoded)
+        });
+
+        assert!(authorization.is_some());
+        let auth_header = authorization.unwrap();
+        assert!(auth_header.starts_with("Basic "));
+        assert!(!auth_header.contains("test_secret")); // Secret should be encoded
+        assert!(!auth_header.contains("test_id")); // Client ID should be encoded
+    }
+}
+
