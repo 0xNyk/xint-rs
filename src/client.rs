@@ -302,14 +302,22 @@ impl XClient {
     }
 
     /// POST with form-encoded body (for token exchange).
-    pub async fn post_form(&self, url: &str, params: &[(&str, &str)]) -> Result<serde_json::Value> {
-        let res = self
+    pub async fn post_form(
+        &self,
+        url: &str,
+        params: &[(&str, &str)],
+        authorization: Option<&str>,
+    ) -> Result<serde_json::Value> {
+        let mut req = self
             .http
             .post(url)
-            .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
-            .form(params)
-            .send()
-            .await?;
+            .header(CONTENT_TYPE, "application/x-www-form-urlencoded");
+
+        if let Some(auth) = authorization {
+            req = req.header(AUTHORIZATION, auth);
+        }
+
+        let res = req.form(params).send().await?;
 
         if !res.status().is_success() {
             let status = res.status().as_u16();

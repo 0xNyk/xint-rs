@@ -132,8 +132,9 @@ fn load_kb(config: &Config) -> Option<BookmarkKnowledgeBase> {
 pub async fn run(args: &EngageArgs, config: &Config, client: &XClient) -> Result<()> {
     let api_key = config.require_xai_key()?;
     let client_id = config.require_client_id()?;
+    let client_secret = config.client_secret.as_deref();
     let (access_token, tokens) =
-        oauth::get_valid_token(client, &config.tokens_path(), client_id).await?;
+        oauth::get_valid_token(client, &config.tokens_path(), client_id, client_secret).await?;
     let bearer = config.require_bearer_token()?;
     let user_id = &tokens.user_id;
 
