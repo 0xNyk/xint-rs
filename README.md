@@ -31,15 +31,29 @@
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/0xNyk/xint-rs/main/install.sh | bash
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/0xNyk/xint-rs/main/install.sh | bash
 ```
 
-Optional pinned version:
+The installer defaults to a pinned release and refuses to unpack an archive whose SHA-256 is missing or does not match the release's `SHA256SUMS`. If `gh` is installed and logged in, it also checks the GitHub build attestation (`gh attestation verify`).
+
+Pick another release, preview, or require the attestation:
 
 ```bash
-XINT_RS_INSTALL_VERSION=<version-tag> \
-curl -fsSL https://raw.githubusercontent.com/0xNyk/xint-rs/main/install.sh | bash
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/0xNyk/xint-rs/main/install.sh | bash -s -- --version <version-tag>   # or --version latest
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/0xNyk/xint-rs/main/install.sh | bash -s -- --dry-run
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/0xNyk/xint-rs/main/install.sh | XINT_RS_VERIFY_ATTESTATION=require bash
 ```
+
+Verify a downloaded archive by hand:
+
+```bash
+shasum -a 256 -c SHA256SUMS --ignore-missing
+gh attestation verify xint-rs-<platform>-<version>.tar.gz --repo 0xNyk/xint-rs \
+  --signer-workflow 0xNyk/xint-rs/.github/workflows/release.yml \
+  --source-ref refs/tags/<version> --deny-self-hosted-runners
+```
+
+Release 2026.5.16 predates `SHA256SUMS` and attestations; the installer pins its macOS arm64 digest instead.
 
 Homebrew (lightweight prebuilt binary on Apple Silicon):
 
