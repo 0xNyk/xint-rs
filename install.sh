@@ -1,247 +1,244 @@
 #!/usr/bin/env bash
+# xint-rs installer
+#
+#   curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/0xNyk/xint-rs/main/install.sh | bash
+#   curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/0xNyk/xint-rs/main/install.sh | bash -s -- --version 2026.5.16
+#
+# Flags:
+#   --version <tag>     release to install (default: the pinned DEFAULT_VERSION below; "latest" allowed)
+#   --bin-dir <dir>     default: ~/.local/bin
+#   --dry-run           print what would be downloaded and verified, then exit
+#   -h, --help
+#
+# Options (env):
+#   XINT_RS_INSTALL_VERSION=<tag>        same as --version
+#   XINT_RS_INSTALL_BIN_DIR=<dir>        same as --bin-dir
+#   XINT_RS_VERIFY_ATTESTATION=auto      auto | require | skip  (GitHub artifact attestation via `gh`)
+#
+# Every archive is verified against a SHA-256 before it is unpacked: the digest
+# pinned in this script for older releases, otherwise the SHA256SUMS file
+# published with the same release. A missing or mismatched checksum aborts.
+# (XINT_RS_INSTALL_REQUIRE_CHECKSUM is obsolete: checksums are always required.)
 set -euo pipefail
 
 OWNER="0xNyk"
 REPO="xint-rs"
 BIN_NAME="xint"
+# Bump together with each release (and drop it from pinned_sha256 once that release ships SHA256SUMS).
+DEFAULT_VERSION="2026.5.16"
+SIGNER_WORKFLOW="${OWNER}/${REPO}/.github/workflows/release.yml"
 
 INSTALL_BIN_DIR="${XINT_RS_INSTALL_BIN_DIR:-$HOME/.local/bin}"
-REQUESTED_VERSION="${XINT_RS_INSTALL_VERSION:-latest}"
-REQUIRE_CHECKSUM="${XINT_RS_INSTALL_REQUIRE_CHECKSUM:-0}"
+REQUESTED_VERSION="${XINT_RS_INSTALL_VERSION:-$DEFAULT_VERSION}"
+ATTEST_MODE="${XINT_RS_VERIFY_ATTESTATION:-auto}"
+DRY_RUN=0
+
+die() {
+  echo "error: $*" >&2
+  exit 1
+}
+
+usage() {
+  cat <<'USAGE'
+usage: install.sh [--version <tag>|latest] [--bin-dir <dir>] [--dry-run]
+
+env: XINT_RS_INSTALL_VERSION, XINT_RS_INSTALL_BIN_DIR,
+     XINT_RS_VERIFY_ATTESTATION=auto|require|skip
+USAGE
+}
 
 require_cmd() {
-  if ! command -v "$1" >/dev/null 2>&1; then
-    echo "error: missing required command '$1'" >&2
-    exit 1
+  command -v "$1" >/dev/null 2>&1 || die "missing required command '$1'"
+}
+
+curl_https() {
+  curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL --retry 3 "$@"
+}
+
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    die "need sha256sum or shasum to verify the download"
   fi
+}
+
+# Releases published before the release workflow emitted SHA256SUMS and
+# attestations. Digest matches the one pinned in the 0xNyk/homebrew-xint formula.
+pinned_sha256() {
+  case "$1" in
+    xint-rs-macos-arm64-2026.5.16.tar.gz) echo "8253b3a3e13ebdc26674ab7a6b753eb9869b506cd37a204a589b867b0407b5be" ;;
+    *) return 1 ;;
+  esac
+}
+
+# Print the digest listed for $2 in checksum file $1 (exact filename match).
+checksum_entry() {
+  awk -v name="$2" '($2 == name || $2 == "*" name) { print tolower($1); exit }' "$1"
+}
+
+is_sha256() {
+  [[ "$1" =~ ^[0-9a-f]{64}$ ]]
 }
 
 detect_platform() {
   local os arch
-  os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  os="$(uname -s)"
   arch="$(uname -m)"
 
   case "$os" in
-    darwin|linux) ;;
-    *)
-      echo "error: unsupported OS '$os'" >&2
-      exit 1
-      ;;
+    Darwin) os="macos" ;;
+    Linux) os="linux" ;;
+    *) die "unsupported OS '$os'" ;;
   esac
 
   case "$arch" in
     x86_64|amd64) arch="x86_64" ;;
-    arm64|aarch64) arch="aarch64" ;;
-    *)
-      echo "error: unsupported architecture '$arch'" >&2
-      exit 1
-      ;;
+    arm64|aarch64) arch="arm64" ;;
+    *) die "unsupported architecture '$arch'" ;;
   esac
 
-  printf '%s %s' "$os" "$arch"
+  printf '%s-%s' "$os" "$arch"
 }
 
-release_api_url() {
+resolve_tag() {
+  local effective
   if [[ "$REQUESTED_VERSION" == "latest" ]]; then
-    printf 'https://api.github.com/repos/%s/%s/releases/latest' "$OWNER" "$REPO"
+    effective="$(curl_https -o /dev/null -w '%{url_effective}' "https://github.com/${OWNER}/${REPO}/releases/latest")" \
+      || die "could not resolve latest release"
+    printf '%s' "${effective##*/}"
   else
-    printf 'https://api.github.com/repos/%s/%s/releases/tags/%s' "$OWNER" "$REPO" "$REQUESTED_VERSION"
+    printf '%s' "$REQUESTED_VERSION"
   fi
 }
 
-select_assets() {
-  local release_json="$1"
-  local os="$2"
-  local arch="$3"
+verify_attestation() {
+  local file="$1" tag="$2" pinned="$3"
 
-  python3 - "$release_json" "$os" "$arch" <<'PY'
-import json
-import os
-import sys
-
-release_path, os_name, arch_name = sys.argv[1], sys.argv[2], sys.argv[3]
-with open(release_path, "r", encoding="utf-8") as fh:
-    release = json.load(fh)
-
-assets = release.get("assets", [])
-tag = release.get("tag_name", "")
-
-asset_map = {a.get("name"): a.get("browser_download_url") for a in assets if a.get("name")}
-names = [a.get("name", "") for a in assets]
-
-candidates = [
-    f"xint-{os_name}-{arch_name}",
-    f"xint_{os_name}_{arch_name}",
-    f"xint-{arch_name}-{os_name}",
-    "xint",
-]
-suffixes = ["", ".tar.gz", ".tgz", ".zip"]
-
-selected_name = None
-for base in candidates:
-    for suffix in suffixes:
-        name = f"{base}{suffix}"
-        if name in asset_map:
-            selected_name = name
-            break
-    if selected_name:
-        break
-
-if not selected_name:
-    for name in names:
-        if name.startswith("xint") and "checksum" not in name and "sha256" not in name:
-            selected_name = name
-            break
-
-checksum_name = None
-for name in names:
-    lowered = name.lower()
-    if "checksum" in lowered or "sha256" in lowered:
-        checksum_name = name
-        break
-
-if not selected_name:
-    raise SystemExit("no_install_asset")
-
-print(tag)
-print(selected_name)
-print(asset_map[selected_name])
-print(checksum_name or "")
-print(asset_map.get(checksum_name, "") if checksum_name else "")
-PY
-}
-
-verify_checksum_if_available() {
-  local asset_file="$1"
-  local checksums_file="$2"
-  local asset_name="$3"
-
-  if [[ ! -f "$checksums_file" ]]; then
-    if [[ "$REQUIRE_CHECKSUM" == "1" ]]; then
-      echo "error: checksum required but checksums file not provided" >&2
-      exit 1
-    fi
-    echo "==> No checksums asset found; skipping checksum verification"
+  if [[ "$ATTEST_MODE" == "skip" ]]; then
+    echo "==> Attestation skipped (XINT_RS_VERIFY_ATTESTATION=skip)"
     return
   fi
-
-  local expected
-  expected="$(awk -v name="$asset_name" '$0 ~ name {print $1; exit}' "$checksums_file" || true)"
-  if [[ -z "$expected" ]]; then
-    if [[ "$REQUIRE_CHECKSUM" == "1" ]]; then
-      echo "error: checksum required but asset entry not found in checksums file" >&2
-      exit 1
-    fi
-    echo "==> Checksums file present, but no entry for $asset_name; skipping verification"
+  if [[ -n "$pinned" ]]; then
+    echo "==> No attestation for ${tag} (predates attestations; pinned digest checked)"
     return
   fi
-
-  local actual=""
-  if command -v sha256sum >/dev/null 2>&1; then
-    actual="$(sha256sum "$asset_file" | awk '{print $1}')"
-  elif command -v shasum >/dev/null 2>&1; then
-    actual="$(shasum -a 256 "$asset_file" | awk '{print $1}')"
+  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    gh attestation verify "$file" \
+      --repo "${OWNER}/${REPO}" \
+      --signer-workflow "$SIGNER_WORKFLOW" \
+      --source-ref "refs/tags/${tag}" \
+      --deny-self-hosted-runners >/dev/null \
+      || die "GitHub attestation verification failed for $(basename "$file")"
+    echo "==> Attestation verified (${SIGNER_WORKFLOW} @ ${tag})"
+  elif [[ "$ATTEST_MODE" == "require" ]]; then
+    die "XINT_RS_VERIFY_ATTESTATION=require needs an authenticated 'gh' CLI"
   else
-    if [[ "$REQUIRE_CHECKSUM" == "1" ]]; then
-      echo "error: checksum required but neither sha256sum nor shasum is available" >&2
-      exit 1
-    fi
-    echo "==> Checksum tool unavailable; skipping verification"
-    return
+    echo "==> Attestation skipped (install and log in to 'gh' to verify provenance)"
   fi
-
-  if [[ "$actual" != "$expected" ]]; then
-    echo "error: checksum mismatch for $asset_name" >&2
-    exit 1
-  fi
-  echo "==> Checksum verified"
-}
-
-extract_binary() {
-  local asset_file="$1"
-  local asset_name="$2"
-  local workdir="$3"
-
-  local out_file="${workdir}/${BIN_NAME}"
-  case "$asset_name" in
-    *.tar.gz|*.tgz)
-      local extract_dir="${workdir}/extract"
-      mkdir -p "$extract_dir"
-      tar -xzf "$asset_file" -C "$extract_dir"
-      local found
-      found="$(find "$extract_dir" -type f -name "$BIN_NAME" | head -n1)"
-      if [[ -z "$found" ]]; then
-        echo "error: binary '$BIN_NAME' not found in archive $asset_name" >&2
-        exit 1
-      fi
-      cp "$found" "$out_file"
-      ;;
-    *.zip)
-      require_cmd unzip
-      local extract_dir="${workdir}/extract"
-      mkdir -p "$extract_dir"
-      unzip -q "$asset_file" -d "$extract_dir"
-      local found
-      found="$(find "$extract_dir" -type f -name "$BIN_NAME" | head -n1)"
-      if [[ -z "$found" ]]; then
-        echo "error: binary '$BIN_NAME' not found in archive $asset_name" >&2
-        exit 1
-      fi
-      cp "$found" "$out_file"
-      ;;
-    *)
-      cp "$asset_file" "$out_file"
-      ;;
-  esac
-
-  chmod +x "$out_file"
-  printf '%s' "$out_file"
 }
 
 main() {
-  require_cmd curl
-  require_cmd python3
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --version) [[ "$#" -ge 2 ]] || die "--version needs a value"; REQUESTED_VERSION="$2"; shift 2 ;;
+      --version=*) REQUESTED_VERSION="${1#--version=}"; shift ;;
+      --bin-dir) [[ "$#" -ge 2 ]] || die "--bin-dir needs a value"; INSTALL_BIN_DIR="$2"; shift 2 ;;
+      --bin-dir=*) INSTALL_BIN_DIR="${1#--bin-dir=}"; shift ;;
+      --dry-run) DRY_RUN=1; shift ;;
+      -h|--help) usage; exit 0 ;;
+      *) die "unknown argument: $1 (try --help)" ;;
+    esac
+  done
 
-  read -r os arch <<<"$(detect_platform)"
+  case "$ATTEST_MODE" in
+    auto|require|skip) ;;
+    *) die "XINT_RS_VERIFY_ATTESTATION must be auto, require, or skip" ;;
+  esac
+
+  require_cmd uname
+  require_cmd curl
+
+  local platform tag
+  platform="$(detect_platform)"
+  tag="$(resolve_tag)"
+  [[ "$tag" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] \
+    || die "invalid release tag '${tag}' (expected YYYY.M.D[.N] or latest)"
+
+  local asset_name="${REPO}-${platform}-${tag}.tar.gz"
+  local base_url="https://github.com/${OWNER}/${REPO}/releases/download/${tag}"
+  local pinned=""
+  pinned="$(pinned_sha256 "$asset_name")" || pinned=""
+  if [[ -n "$pinned" && "$ATTEST_MODE" == "require" ]]; then
+    die "${tag} predates release attestations; pick a newer --version"
+  fi
+
+  if [[ "$DRY_RUN" == "1" ]]; then
+    echo "==> Dry run: ${BIN_NAME} ${tag} for ${platform}"
+    echo "   archive:   ${base_url}/${asset_name}"
+    if [[ -n "$pinned" ]]; then
+      echo "   sha256:    ${pinned} (pinned in installer)"
+    else
+      echo "   checksums: ${base_url}/SHA256SUMS (required)"
+    fi
+    echo "   attestation mode: ${ATTEST_MODE} (signer ${SIGNER_WORKFLOW})"
+    echo "   dest:      ${INSTALL_BIN_DIR}/${BIN_NAME}"
+    return
+  fi
+
+  require_cmd tar
+  require_cmd awk
 
   local tmpdir
-  tmpdir="$(mktemp -d)"
-  trap 'rm -rf "$tmpdir"' EXIT
-
-  local release_json="${tmpdir}/release.json"
-  echo "==> Fetching release metadata"
-  curl -fsSL "$(release_api_url)" -o "$release_json"
-
-  local tag asset_name asset_url checksum_name checksum_url
-  mapfile -t meta < <(select_assets "$release_json" "$os" "$arch")
-  if [[ "${#meta[@]}" -lt 5 ]]; then
-    echo "error: failed to resolve release assets for ${os}/${arch}" >&2
-    exit 1
-  fi
-  tag="${meta[0]}"
-  asset_name="${meta[1]}"
-  asset_url="${meta[2]}"
-  checksum_name="${meta[3]}"
-  checksum_url="${meta[4]}"
+  tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/xint-rs-install.XXXXXX")"
+  # shellcheck disable=SC2064 # expand now: tmpdir is local to main
+  trap "rm -rf -- '${tmpdir}'" EXIT
 
   local asset_file="${tmpdir}/${asset_name}"
   echo "==> Downloading ${asset_name} (${tag})"
-  curl -fsSL "$asset_url" -o "$asset_file"
+  curl_https "${base_url}/${asset_name}" -o "$asset_file" \
+    || die "no prebuilt ${asset_name} in release ${tag}; build from source with: cargo install --git https://github.com/${OWNER}/${REPO} --tag ${tag} --locked"
 
-  local checksums_file=""
-  if [[ -n "$checksum_url" ]]; then
-    checksums_file="${tmpdir}/${checksum_name}"
-    curl -fsSL "$checksum_url" -o "$checksums_file"
+  local listed="" expected source_label
+  if curl_https "${base_url}/SHA256SUMS" -o "${tmpdir}/SHA256SUMS" 2>/dev/null; then
+    listed="$(checksum_entry "${tmpdir}/SHA256SUMS" "$asset_name")"
+    [[ -n "$listed" || -n "$pinned" ]] || die "SHA256SUMS for ${tag} has no entry for ${asset_name}; refusing to install"
+  elif [[ -z "$pinned" ]]; then
+    die "release ${tag} publishes no SHA256SUMS; refusing to install an unverified binary"
   fi
 
-  verify_checksum_if_available "$asset_file" "$checksums_file" "$asset_name"
+  if [[ -n "$pinned" ]]; then
+    [[ -z "$listed" || "$listed" == "$pinned" ]] \
+      || die "SHA256SUMS disagrees with the pinned digest for ${asset_name}; refusing to install"
+    expected="$pinned"
+    source_label="pinned digest"
+  else
+    expected="$listed"
+    source_label="SHA256SUMS"
+  fi
+  is_sha256 "$expected" || die "malformed checksum for ${asset_name}"
 
-  local extracted_bin
-  extracted_bin="$(extract_binary "$asset_file" "$asset_name" "$tmpdir")"
+  local actual
+  actual="$(sha256_file "$asset_file")"
+  [[ "$actual" == "$expected" ]] || die "checksum mismatch for ${asset_name} (expected ${expected}, got ${actual})"
+  echo "==> Checksum verified (${source_label})"
+
+  verify_attestation "$asset_file" "$tag" "$pinned"
+
+  local extract_dir="${tmpdir}/extract"
+  mkdir -p "$extract_dir"
+  tar -xzf "$asset_file" -C "$extract_dir"
+  local found="${extract_dir}/${BIN_NAME}"
+  if [[ ! -f "$found" ]]; then
+    found="$(find "$extract_dir" -type f -name "$BIN_NAME" | head -n1)"
+  fi
+  [[ -n "$found" && -f "$found" ]] || die "binary '${BIN_NAME}' not found in archive ${asset_name}"
 
   mkdir -p "$INSTALL_BIN_DIR"
   local final_bin="${INSTALL_BIN_DIR}/${BIN_NAME}"
-  install -m 755 "$extracted_bin" "$final_bin"
+  install -m 755 "$found" "$final_bin"
 
   echo "==> Installed ${BIN_NAME} ${tag}"
   echo "   Binary: ${final_bin}"

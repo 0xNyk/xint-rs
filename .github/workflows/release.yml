@@ -1,0 +1,172 @@
+name: Release
+
+# Builds, checksums, and attests release archives for a version tag
+# (YYYY.M.D or YYYY.M.D.N) that points at a commit on the default branch.
+# The GitHub release itself may already exist (created by the xint release
+# script); this workflow attaches the archives and SHA256SUMS to it.
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+      - "[0-9]+.[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify-tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Tag is a release version on the default branch
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+            echo "::error::tag '$TAG' is not a release version"
+            exit 1
+          fi
+          git fetch --no-tags origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/${DEFAULT_BRANCH}"; then
+            echo "::error::tag commit $GITHUB_SHA is not on ${DEFAULT_BRANCH}"
+            exit 1
+          fi
+          # Same mapping as xint scripts/release.sh cargo_semver_version():
+          # tag YYYY.M.D -> Cargo YYYY.M.D, tag YYYY.M.D.N -> Cargo YYYY.M.D-N.
+          IFS='.' read -r -a parts <<< "$TAG"
+          if [[ "${#parts[@]}" -eq 4 ]]; then
+            expected="${parts[0]}.${parts[1]}.${parts[2]}-${parts[3]}"
+          else
+            expected="$TAG"
+          fi
+          cargo_version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+          if [[ "$cargo_version" != "$expected" ]]; then
+            echo "::error::Cargo.toml version '$cargo_version' does not match tag '$TAG' (expected '$expected')"
+            exit 1
+          fi
+
+  build:
+    needs: verify-tag
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+            platform: macos-arm64
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            platform: macos-x86_64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            platform: linux-x86_64
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            platform: linux-arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal --target "$TARGET"
+          rustup default stable
+          rustc --version
+
+      - name: Build
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo build --release --locked --target "$TARGET"
+
+      - name: Package
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          OUT="xint-rs-${PLATFORM}-${GITHUB_REF_NAME}.tar.gz"
+          mkdir -p stage dist
+          cp "target/${TARGET}/release/xint" stage/xint
+          cp LICENSE README.md stage/
+          tar -C stage -czf "dist/${OUT}" xint LICENSE README.md
+
+      - name: Upload archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: xint-rs-${{ matrix.platform }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    needs: [verify-tag, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Add required reviewers to this environment in repo settings to gate publication.
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download archives
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: xint-rs-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Collect archives and write SHA256SUMS
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          cp artifacts/*.tar.gz release/
+          cd release
+          sha256sum -- *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with:
+          subject-path: |
+            release/*.tar.gz
+            release/SHA256SUMS
+
+      - name: Attach to GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --verify-tag --title "xint-rs ${TAG}" --generate-notes
+          fi
+          gh release upload "$TAG" release/*.tar.gz release/SHA256SUMS --clobber
