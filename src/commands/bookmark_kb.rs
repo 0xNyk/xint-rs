@@ -365,7 +365,7 @@ async fn run_extract(args: &BookmarkKbArgs, config: &Config, client: &XClient) -
         if !kb.topic_index.is_empty() {
             println!("\n  Top topics:");
             let mut topics: Vec<_> = kb.topic_index.iter().collect();
-            topics.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+            topics.sort_by_key(|t| std::cmp::Reverse(t.1.len()));
             for (topic, ids) in topics.iter().take(10) {
                 println!("    {}: {} tweets", topic, ids.len());
             }
@@ -474,7 +474,7 @@ async fn run_search(args: &BookmarkKbArgs, query_parts: &[String], config: &Conf
         })
         .collect();
 
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    scored.sort_by_key(|s| std::cmp::Reverse(s.0));
     let results: Vec<_> = scored.into_iter().take(limit).collect();
 
     if results.is_empty() {
@@ -723,7 +723,7 @@ fn run_topics(args: &BookmarkKbArgs, config: &Config) -> Result<()> {
     }
 
     let mut topics: Vec<_> = kb.topic_index.iter().collect();
-    topics.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+    topics.sort_by_key(|t| std::cmp::Reverse(t.1.len()));
 
     if args.json {
         let arr: Vec<serde_json::Value> = topics

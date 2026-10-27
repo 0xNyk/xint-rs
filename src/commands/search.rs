@@ -39,7 +39,11 @@ pub async fn run(args: &SearchArgs, config: &Config, client: &XClient) -> Result
         let pages_est = args.pages.clamp(1, 5);
         let per_page = if args.full { 500u64 } else { 100u64 };
         let units = pages_est as u64 * per_page;
-        let op = if args.full { "search_archive" } else { "search" };
+        let op = if args.full {
+            "search_archive"
+        } else {
+            "search"
+        };
         let endpoint = if args.full {
             "/2/tweets/search/all"
         } else {

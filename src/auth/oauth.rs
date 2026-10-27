@@ -202,7 +202,8 @@ pub async fn get_valid_token(
 
     if now >= tokens.expires_at - EXPIRY_BUFFER_MS {
         eprintln!("OAuth token expired, refreshing...");
-        let refreshed = refresh_tokens(client, tokens_path, client_id, client_secret, &tokens).await?;
+        let refreshed =
+            refresh_tokens(client, tokens_path, client_id, client_secret, &tokens).await?;
         eprintln!("Token refreshed for @{}", refreshed.username);
         let token = refreshed.access_token.clone();
         Ok((token, refreshed))
@@ -543,7 +544,11 @@ mod tests {
         let client_id = "client_123";
 
         // Create a formatted debug string without exposing the secret
-        let debug_str = format!("client_id={}, has_secret={}", client_id, client_secret.is_some());
+        let debug_str = format!(
+            "client_id={}, has_secret={}",
+            client_id,
+            client_secret.is_some()
+        );
 
         assert!(!debug_str.contains("super_secret_value"));
         assert!(debug_str.contains("has_secret=true"));
@@ -585,4 +590,3 @@ mod tests {
         assert!(!auth_header.contains("test_id")); // Client ID should be encoded
     }
 }
-

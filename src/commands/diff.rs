@@ -56,10 +56,15 @@ pub async fn run(args: &DiffArgs, config: &Config, client: &XClient) -> Result<(
     // fresh (<24h) snapshot exists.
     if args.dry_run {
         let max_units = args.pages as u64 * 1000;
-        let op = if args.following { "following_list" } else { "followers" };
+        let op = if args.following {
+            "following_list"
+        } else {
+            "followers"
+        };
         let cost = crate::dryrun::estimate_cost(op, max_units, 1);
         let cached = !args.fresh
-            && load_fresh_snapshot(&snapshots_dir, &username, snap_type, 24 * 60 * 60 * 1000).is_some();
+            && load_fresh_snapshot(&snapshots_dir, &username, snap_type, 24 * 60 * 60 * 1000)
+                .is_some();
         let notes: Vec<&str> = if cached {
             vec![
                 "Snapshot cache HIT predicted — real cost likely $0 (pass --fresh to bypass).",
@@ -91,7 +96,9 @@ pub async fn run(args: &DiffArgs, config: &Config, client: &XClient) -> Result<(
     let mut cache_hit = false;
 
     if !args.fresh {
-        if let Some(cached) = load_fresh_snapshot(&snapshots_dir, &username, snap_type, SNAPSHOT_TTL_MS) {
+        if let Some(cached) =
+            load_fresh_snapshot(&snapshots_dir, &username, snap_type, SNAPSHOT_TTL_MS)
+        {
             let age_hours = chrono::Utc::now()
                 .signed_duration_since(
                     chrono::DateTime::parse_from_rfc3339(&cached.timestamp)

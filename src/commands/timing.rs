@@ -206,7 +206,7 @@ fn analyze_timing(tweets: &[Tweet]) -> TimingAnalysis {
         .collect();
 
     // Sort hour_stats for display
-    hour_stats.sort_by(|a, b| a.hour.cmp(&b.hour));
+    hour_stats.sort_by_key(|a| a.hour);
 
     TimingAnalysis {
         total_tweets: tweets.len(),
