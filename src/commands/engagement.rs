@@ -511,10 +511,9 @@ pub async fn reply_to_tweet(
         "text": text,
         "reply": { "in_reply_to_tweet_id": tweet_id }
     });
-    let resp = client.oauth_post("tweets", access_token, Some(&body)).await?;
-    let reply_id = resp["data"]["id"]
-        .as_str()
-        .unwrap_or("unknown")
-        .to_string();
+    let resp = client
+        .oauth_post("tweets", access_token, Some(&body))
+        .await?;
+    let reply_id = resp["data"]["id"].as_str().unwrap_or("unknown").to_string();
     Ok(reply_id)
 }

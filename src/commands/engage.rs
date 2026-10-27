@@ -83,7 +83,9 @@ fn extract_tweet_id(url: &str) -> Option<String> {
     let marker = "status/";
     let start = url.find(marker)? + marker.len();
     let rest = &url[start..];
-    let end = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+    let end = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len());
     if end == 0 {
         return None;
     }
@@ -147,12 +149,12 @@ pub async fn run(args: &EngageArgs, config: &Config, client: &XClient) -> Result
 
     let http = reqwest::Client::new();
 
-    let from_date = twitter::parse_since(since)
-        .map(|ts| ts.split('T').next().unwrap_or("").to_string());
+    let from_date =
+        twitter::parse_since(since).map(|ts| ts.split('T').next().unwrap_or("").to_string());
     let search_query = format!("popular {niche} tweets with many likes");
     let (search_results, _summary, citations) = xai::x_search(
         &http,
-        &api_key,
+        api_key,
         &search_query,
         (count * 3).max(10) as u32,
         from_date.as_deref(),
@@ -191,9 +193,9 @@ pub async fn run(args: &EngageArgs, config: &Config, client: &XClient) -> Result
     // Fetch each tweet for exact metrics
     let mut enriched: Vec<Tweet> = Vec::new();
     for id in tweet_ids.iter().take(count * 2) {
-        match twitter::get_tweet(client, &bearer, id).await {
-            Ok(Some(tweet)) => enriched.push(tweet),
-            _ => {} // Skip inaccessible tweets
+        // Skip inaccessible tweets.
+        if let Ok(Some(tweet)) = twitter::get_tweet(client, bearer, id).await {
+            enriched.push(tweet);
         }
     }
 
@@ -201,7 +203,11 @@ pub async fn run(args: &EngageArgs, config: &Config, client: &XClient) -> Result
     drop(spinner);
     let spinner = Spinner::new("Scanning home feed for niche tweets...");
     {
-        let niche_words: Vec<String> = niche.to_lowercase().split_whitespace().map(String::from).collect();
+        let niche_words: Vec<String> = niche
+            .to_lowercase()
+            .split_whitespace()
+            .map(String::from)
+            .collect();
         let feed_fields = "tweet.fields=created_at,public_metrics,entities,note_tweet&expansions=author_id&user.fields=username,name,public_metrics";
         let feed_path = format!(
             "users/{user_id}/timelines/reverse_chronological?max_results=100&{feed_fields}"
@@ -259,9 +265,17 @@ pub async fn run(args: &EngageArgs, config: &Config, client: &XClient) -> Result
     }
 
     // User timeline
-    if let Ok(timeline) =
-        twitter::get_user_timeline(client, &access_token, user_id, 100, 3, true, true, Some("30d"))
-            .await
+    if let Ok(timeline) = twitter::get_user_timeline(
+        client,
+        &access_token,
+        user_id,
+        100,
+        3,
+        true,
+        true,
+        Some("30d"),
+    )
+    .await
     {
         for t in &timeline {
             let url = t.tweet_url.clone();
@@ -379,14 +393,9 @@ confidence: 1-5 (5 = perfect fit). Set linked_content_url to null if nothing fit
         max_tokens: 4096,
     };
 
-    let grok_resp = grok::grok_chat_tracked(
-        &http,
-        &api_key,
-        &messages,
-        &opts,
-        Some(&config.costs_path()),
-    )
-    .await?;
+    let grok_resp =
+        grok::grok_chat_tracked(&http, api_key, &messages, &opts, Some(&config.costs_path()))
+            .await?;
 
     let cleaned = strip_markdown_fences(&grok_resp.content);
     let parsed: Vec<GrokSuggestion> = serde_json::from_str(&cleaned)
@@ -413,7 +422,7 @@ confidence: 1-5 (5 = perfect fit). Set linked_content_url to null if nothing fit
             reply_text: p.reply_text.clone(),
             linked_content_url: p.linked_content_url.clone(),
             link_reason: p.link_reason.clone(),
-            confidence: p.confidence.unwrap_or(3).min(5).max(1),
+            confidence: p.confidence.unwrap_or(3).clamp(1, 5),
         });
     }
 

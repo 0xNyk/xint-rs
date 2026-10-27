@@ -20,10 +20,12 @@ const RATE_DELAY_MS: u64 = 350;
 // + subscription_type (Premium badge + long-form posts).
 pub const MINIMAL_FIELDS: &str = "tweet.fields=created_at,public_metrics,author_id,conversation_id,entities&expansions=author_id&user.fields=username,name,public_metrics";
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub const STANDARD_FIELDS: &str = "tweet.fields=created_at,public_metrics,author_id,conversation_id,entities&expansions=author_id&user.fields=username,name,public_metrics,connection_status";
 
 pub const EXTENDED_FIELDS: &str = "tweet.fields=created_at,public_metrics,author_id,conversation_id,entities,article,note_tweet&expansions=author_id&user.fields=username,name,public_metrics,connection_status,subscription_type";
 
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FieldLevel {
     #[default]
@@ -32,6 +34,7 @@ pub enum FieldLevel {
     Extended,
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn fields_for(level: FieldLevel) -> &'static str {
     match level {
         FieldLevel::Minimal => MINIMAL_FIELDS,

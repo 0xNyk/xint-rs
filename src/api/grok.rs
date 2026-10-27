@@ -24,7 +24,9 @@ impl std::str::FromStr for Budget {
             "cheap" => Ok(Budget::Cheap),
             "balanced" => Ok(Budget::Balanced),
             "max" => Ok(Budget::Max),
-            other => Err(format!("budget must be cheap | balanced | max (got {other})")),
+            other => Err(format!(
+                "budget must be cheap | balanced | max (got {other})"
+            )),
         }
     }
 }
@@ -60,9 +62,7 @@ fn model_pricing(model: &str) -> (f64, f64) {
         // Current lineup
         "grok-4.3" => (1.25, 2.50),
         "grok-4.20" | "grok-4.20-reasoning" | "grok-4.20-non-reasoning" => (2.00, 6.00),
-        "grok-4-1-fast"
-        | "grok-4-1-fast-reasoning"
-        | "grok-4-1-fast-non-reasoning" => (0.20, 0.50),
+        "grok-4-1-fast" | "grok-4-1-fast-reasoning" | "grok-4-1-fast-non-reasoning" => (0.20, 0.50),
         // Retiring 2026-05-15
         "grok-4.20-beta" => (2.00, 6.00),
         "grok-4" => (3.00, 15.00),
@@ -198,7 +198,8 @@ pub async fn grok_chat_tracked(
         .and_then(|v| v.as_i64());
 
     if let Some(cp) = costs_path {
-        let cost_usd = cost_from_response(ticks, &model, usage.prompt_tokens, usage.completion_tokens);
+        let cost_usd =
+            cost_from_response(ticks, &model, usage.prompt_tokens, usage.completion_tokens);
         costs::track_cost_direct(cp, "grok_chat", XAI_ENDPOINT, cost_usd);
     }
 
@@ -379,7 +380,10 @@ mod tests {
 
     #[test]
     fn budget_max_maps_to_grok_4_20_reasoning() {
-        assert_eq!(Budget::from_str("max").unwrap().model(), "grok-4.20-reasoning");
+        assert_eq!(
+            Budget::from_str("max").unwrap().model(),
+            "grok-4.20-reasoning"
+        );
     }
 
     #[test]

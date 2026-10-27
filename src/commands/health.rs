@@ -408,7 +408,7 @@ pub async fn run(args: &HealthArgs, config: &Config, client: &XClient) -> Result
     );
 
     let mut top_commands: Vec<_> = report.reliability.by_command.iter().collect();
-    top_commands.sort_by(|a, b| b.1.calls.cmp(&a.1.calls));
+    top_commands.sort_by_key(|c| std::cmp::Reverse(c.1.calls));
 
     if !top_commands.is_empty() {
         println!("- Top commands:");

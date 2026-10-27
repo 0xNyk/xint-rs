@@ -1248,7 +1248,7 @@ impl MCPServer {
                     .into_iter()
                     .filter(|(_, count)| *count >= 2)
                     .collect();
-                sorted.sort_by(|a, b| b.1.cmp(&a.1));
+                sorted.sort_by_key(|s| std::cmp::Reverse(s.1));
 
                 let trends: Vec<serde_json::Value> = sorted
                     .into_iter()

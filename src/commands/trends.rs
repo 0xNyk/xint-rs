@@ -125,7 +125,7 @@ pub async fn run(args: &TrendsArgs, config: &Config, client: &XClient) -> Result
         let mut sorted: Vec<_> = unique.into_iter().collect();
         sorted.sort_by(|a, b| a.1.cmp(&b.1));
         for (woeid, name) in &sorted {
-            let display = format!("{}{}", &name[..1].to_uppercase(), &name[1..]);
+            let display = format!("{}{}", name[..1].to_uppercase(), &name[1..]);
             println!("  {display:<20} WOEID {woeid}");
         }
         return Ok(());
@@ -227,7 +227,7 @@ pub async fn run(args: &TrendsArgs, config: &Config, client: &XClient) -> Result
                 .into_iter()
                 .filter(|(_, count)| *count >= 2)
                 .collect();
-            sorted.sort_by(|a, b| b.1.cmp(&a.1));
+            sorted.sort_by_key(|s| std::cmp::Reverse(s.1));
 
             let trends: Vec<Trend> = sorted
                 .into_iter()
